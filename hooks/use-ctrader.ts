@@ -50,14 +50,51 @@ export function useCTrader() {
     return symbolNameMap.current.get(symbolId) || `#${symbolId}`
   }, [])
 
-  // Check for stored token on mount
+  // Check for stored token or OAuth code on mount
   useEffect(() => {
     const token = localStorage.getItem("ctrader_access_token")
-    if (token) setAccessToken(token)
+    if (token) {
+      setAccessToken(token)
+      return
+    }
+
+    // Check if we just came back from OAuth with a code in the URL
+    const params = new URLSearchParams(window.location.search)
+    const code = params.get("code")
+    if (code) {
+      // Exchange code for token
+      const redirectUri = `${window.location.origin}/`
+      fetch("/api/auth/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, redirectUri }),
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error("Token exchange failed")
+          return res.json()
+        })
+        .then((data) => {
+          const token = data.accessToken || data.access_token
+          if (token) {
+            localStorage.setItem("ctrader_access_token", token)
+            localStorage.setItem("ctrader_refresh_token", data.refreshToken || data.refresh_token || "")
+            setAccessToken(token)
+          } else {
+            setError("No token in response")
+          }
+          // Clean URL
+          window.history.replaceState({}, "", "/")
+        })
+        .catch((err) => {
+          setError("Auth failed: " + err.message)
+          window.history.replaceState({}, "", "/")
+        })
+    }
   }, [])
 
   const login = useCallback(() => {
-    const redirectUri = `${window.location.origin}/callback`
+    // Redirect to cTrader OAuth — redirect back to main page (not /callback)
+    const redirectUri = `${window.location.origin}/`
     const authUrl = `${CTRADER_AUTH_URL}?client_id=${CTRADER_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=trading`
     window.location.href = authUrl
   }, [])
