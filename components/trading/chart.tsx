@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Spinner } from "@/components/ui/spinner"
 
 export const TrendbarPeriod = {
