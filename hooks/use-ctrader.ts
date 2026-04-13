@@ -26,6 +26,7 @@ export function useCTrader() {
   const [status, setStatus] = useState<ConnectionStatus>("disconnected")
   const [error, setError] = useState<string | null>(null)
   const [accessToken, setAccessToken] = useState<string | null>(null)
+  const [isLive, setIsLive] = useState(false)
 
   // Account state
   const [accounts, setAccounts] = useState<CtidTraderAccount[]>([])
@@ -118,24 +119,47 @@ export function useCTrader() {
     const token = accessToken
     if (!client || !token) return
 
+    // Check if we need to reconnect to the right server (demo vs live)
+    const account = accounts.find((a) => a.ctidTraderAccountId === accountId)
+    if (account) {
+      const needsLive = account.isLive
+      if (needsLive !== isLive) {
+        // Reconnect to the correct server
+        client.disconnect()
+        clientRef.current = null
+        setIsLive(needsLive)
+        const newClient = new CTraderClient()
+        clientRef.current = newClient
+        await newClient.connect(needsLive)
+        await newClient.authenticateApp()
+      }
+    }
+
+    const activeClient = clientRef.current!
+
     try {
       // Authenticate account
-      await client.authenticateAccount(accountId, token)
+      const authRes = await activeClient.authenticateAccount(accountId, token)
+      console.log("[cTrader] Account auth result:", authRes)
+      if (authRes.payloadType !== PayloadType.OA_ACCOUNT_AUTH_RES) {
+        const errMsg = (authRes.description as string) || (authRes.errorCode as string) || JSON.stringify(authRes)
+        throw new Error(`Account auth failed: ${errMsg}`)
+      }
       setSelectedAccountId(accountId)
 
       // Get trader info
-      const traderRes = await client.getTrader(accountId)
+      const traderRes = await activeClient.getTrader(accountId)
       const traderData = traderRes.trader as OATrader
       setTrader(traderData)
 
       // Get assets to find deposit currency name
-      const assetsRes = await client.getAssetList(accountId)
+      const assetsRes = await activeClient.getAssetList(accountId)
       const assets = (assetsRes.asset as { assetId: number; name: string }[]) || []
       const depositAsset = assets.find((a) => a.assetId === traderData?.depositAssetId)
       if (depositAsset) setDepositAssetName(depositAsset.name)
 
       // Get symbols list
-      const symbolsRes = await client.getSymbolsList(accountId)
+      const symbolsRes = await activeClient.getSymbolsList(accountId)
       const symbolList = (symbolsRes.symbol as OALightSymbol[]) || []
       // Only show enabled symbols, limit to first 100
       const enabledSymbols = symbolList.filter((s) => s.enabled).slice(0, 100)
@@ -151,7 +175,7 @@ export function useCTrader() {
         // Request in batches of 50
         for (let i = 0; i < symbolIds.length; i += 50) {
           const batch = symbolIds.slice(i, i + 50)
-          const detailsRes = await client.getSymbolById(accountId, batch)
+          const detailsRes = await activeClient.getSymbolById(accountId, batch)
           const details = (detailsRes.symbol as OASymbol[]) || []
           setSymbolDetails((prev) => {
             const next = new Map(prev)
@@ -162,18 +186,18 @@ export function useCTrader() {
       }
 
       // Get positions and orders (reconcile)
-      const reconcileRes = await client.getReconcile(accountId)
+      const reconcileRes = await activeClient.getReconcile(accountId)
       setPositions((reconcileRes.position as OAPosition[]) || [])
       setOrders((reconcileRes.order as OAOrder[]) || [])
 
       // Subscribe to spot prices for first 20 symbols
       const spotSymbols = enabledSymbols.slice(0, 20).map((s) => s.symbolId)
       if (spotSymbols.length > 0) {
-        await client.subscribeSpots(accountId, spotSymbols)
+        await activeClient.subscribeSpots(accountId, spotSymbols)
       }
 
       // Listen for spot events
-      client.on(PayloadType.OA_SPOT_EVENT, (msg) => {
+      activeClient.on(PayloadType.OA_SPOT_EVENT, (msg) => {
         const symbolId = msg.symbolId as number
         setQuotes((prev) => {
           const next = new Map(prev)
@@ -188,7 +212,7 @@ export function useCTrader() {
       })
 
       // Listen for execution events (order fills, position changes)
-      client.on(PayloadType.OA_EXECUTION_EVENT, (msg: CTraderMessage) => {
+      activeClient.on(PayloadType.OA_EXECUTION_EVENT, (msg: CTraderMessage) => {
         const executionType = msg.executionType as string
         if (msg.position) {
           setPositions((prev) => {
@@ -239,21 +263,21 @@ export function useCTrader() {
       })
 
       // Listen for trader updates (balance changes)
-      client.on(PayloadType.OA_TRADER_UPDATE_EVENT, (msg) => {
+      activeClient.on(PayloadType.OA_TRADER_UPDATE_EVENT, (msg) => {
         if (msg.trader) {
           setTrader(msg.trader as OATrader)
         }
       })
 
       // Listen for order errors
-      client.on(PayloadType.OA_ORDER_ERROR_EVENT, (msg) => {
+      activeClient.on(PayloadType.OA_ORDER_ERROR_EVENT, (msg) => {
         setError(`Order error: ${msg.description || msg.errorCode || "Unknown error"}`)
         setTimeout(() => setError(null), 5000)
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load account")
     }
-  }, [accessToken])
+  }, [accessToken, accounts, isLive])
 
   const placeOrder = useCallback(async (params: {
     symbolId: number
@@ -306,6 +330,8 @@ export function useCTrader() {
     symbols,
     symbolDetails,
     quotes,
+    isLive,
+    setIsLive,
     positions,
     orders,
     login,
