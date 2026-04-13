@@ -196,19 +196,37 @@ export function useCTrader() {
         await activeClient.subscribeSpots(accountId, spotSymbols)
       }
 
-      // Listen for spot events
-      activeClient.on(PayloadType.OA_SPOT_EVENT, (msg) => {
-        const symbolId = msg.symbolId as number
+      // Listen for spot events — batch updates to avoid re-render storms during scroll
+      let quoteBatch = new Map<number, { bid?: number; ask?: number; timestamp: number }>()
+      let quoteFlushTimer: ReturnType<typeof setTimeout> | null = null
+      const flushQuotes = () => {
+        quoteFlushTimer = null
+        if (quoteBatch.size === 0) return
+        const batch = quoteBatch
+        quoteBatch = new Map()
         setQuotes((prev) => {
           const next = new Map(prev)
-          const existing = next.get(symbolId) || { timestamp: 0 }
-          next.set(symbolId, {
-            bid: (msg.bid as number) ?? existing.bid,
-            ask: (msg.ask as number) ?? existing.ask,
-            timestamp: (msg.timestamp as number) || Date.now(),
+          batch.forEach((update, symId) => {
+            const existing = next.get(symId) || { timestamp: 0 }
+            next.set(symId, {
+              bid: update.bid ?? existing.bid,
+              ask: update.ask ?? existing.ask,
+              timestamp: update.timestamp,
+            })
           })
           return next
         })
+      }
+      activeClient.on(PayloadType.OA_SPOT_EVENT, (msg) => {
+        const symId = msg.symbolId as number
+        quoteBatch.set(symId, {
+          bid: msg.bid as number | undefined,
+          ask: msg.ask as number | undefined,
+          timestamp: (msg.timestamp as number) || Date.now(),
+        })
+        if (!quoteFlushTimer) {
+          quoteFlushTimer = setTimeout(flushQuotes, 250) // flush every 250ms max
+        }
       })
 
       // Listen for execution events (order fills, position changes)

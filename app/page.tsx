@@ -294,7 +294,7 @@ export default function TradingApp() {
             )}
 
             {/* SCREEN CONTENT */}
-            <div className="flex-1 overflow-y-auto">
+            <div className={`flex-1 ${screen === "markets" ? "flex flex-col overflow-hidden" : "overflow-y-auto"}`}>
               {screen === "markets" && (
                 <MarketsScreen
                   symbols={filteredSymbols}
@@ -364,6 +364,23 @@ export default function TradingApp() {
 // ============================================================
 // MARKETS SCREEN
 // ============================================================
+// Classify symbols into asset class groups based on name patterns
+function classifySymbol(name: string): string {
+  const n = name.toUpperCase()
+  // Metals
+  if (n.includes("XAU") || n.includes("XAG") || n.includes("XPT") || n.includes("XPD") || n.includes("GOLD") || n.includes("SILVER")) return "Metals"
+  // Indices
+  if (n.includes("US30") || n.includes("US500") || n.includes("US100") || n.includes("SPX") || n.includes("NAS") || n.includes("DAX") || n.includes("FTSE") || n.includes("NIK") || n.includes("AUS") || n.includes("INDEX") || n.match(/^[A-Z]{2,4}\d{2,3}$/)) return "Indices"
+  // Crypto
+  if (n.includes("BTC") || n.includes("ETH") || n.includes("LTC") || n.includes("XRP") || n.includes("DOGE") || n.includes("SOL") || n.includes("ADA") || n.includes("DOT")) return "Crypto"
+  // Energy
+  if (n.includes("BRENT") || n.includes("WTI") || n.includes("CRUDE") || n.includes("NGAS") || n.includes("OIL")) return "Energy"
+  // Stocks
+  if (n.includes(".US") || n.includes(".EU") || n.includes(".UK")) return "Stocks"
+  // Default: Forex
+  return "Forex"
+}
+
 function MarketsScreen({
   symbols, quotes, positions, symbolDetails, symbolSearch, setSymbolSearch,
   formatPrice, formatVolume, getSymbolName, onOpenDeal,
@@ -383,14 +400,35 @@ function MarketsScreen({
   setChartSymbolId: (id: number | null) => void
   getTrendbars: (symbolId: number, period: number, from: number, to: number) => Promise<any>
 }) {
-  // Default chart to first symbol
+  const [activeCategory, setActiveCategory] = useState("All")
+
   const activeChartId = chartSymbolId || (symbols.length > 0 ? symbols[0].symbolId : null)
   const activeChartSymbol = symbols.find((s) => s.symbolId === activeChartId)
   const activeChartDetails = activeChartId ? symbolDetails.get(activeChartId) : null
+
+  // Group symbols by asset class
+  const grouped = useMemo(() => {
+    const groups = new Map<string, OALightSymbol[]>()
+    symbols.forEach((s) => {
+      const cat = classifySymbol(s.symbolName)
+      if (!groups.has(cat)) groups.set(cat, [])
+      groups.get(cat)!.push(s)
+    })
+    return groups
+  }, [symbols])
+
+  const categories = useMemo(() => ["All", ...Array.from(grouped.keys()).sort()], [grouped])
+
+  const visibleSymbols = useMemo(() => {
+    if (activeCategory === "All") return symbols
+    return grouped.get(activeCategory) || []
+  }, [activeCategory, symbols, grouped])
+
+  // Layout: flex column, symbol list scrolls, chart stays at bottom
   return (
-    <div className="flex flex-col">
-      {/* Search */}
-      <div className="p-3">
+    <div className="flex flex-col h-full">
+      {/* Search - fixed */}
+      <div className="p-3 shrink-0">
         <div className="relative">
           <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-[var(--muted-foreground)]" />
           <input
@@ -402,31 +440,25 @@ function MarketsScreen({
         </div>
       </div>
 
-      {/* Category tabs */}
-      <div className="flex gap-0 px-3 border-b border-[var(--border)]">
-        <TabButton label="Favorites" active />
-        <TabButton label="Forex" />
-        <TabButton label="Metals" />
-        <TabButton label="Indices" />
+      {/* Category tabs - fixed */}
+      <div className="flex gap-0 px-3 border-b border-[var(--border)] shrink-0 overflow-x-auto">
+        {categories.map((cat) => (
+          <TabButton key={cat} label={cat} active={activeCategory === cat} onClick={() => setActiveCategory(cat)} />
+        ))}
       </div>
 
-      {/* Symbol list */}
-      <div>
-        {symbols.map((symbol) => {
+      {/* Symbol list - scrollable */}
+      <div className="flex-1 overflow-y-auto min-h-0">
+        {visibleSymbols.map((symbol) => {
           const quote = quotes.get(symbol.symbolId)
           const details = symbolDetails.get(symbol.symbolId)
-          const symbolPositions = positions.filter(
-            (p) => p.tradeData.symbolId === symbol.symbolId
-          )
-
-          // Calculate spread
+          const symbolPositions = positions.filter((p) => p.tradeData.symbolId === symbol.symbolId)
           const bid = quote?.bid ? quote.bid / 100000 : undefined
           const ask = quote?.ask ? quote.ask / 100000 : undefined
           const spread = bid && ask ? (ask - bid).toFixed(details?.digits ?? 5) : undefined
 
           return (
             <div key={symbol.symbolId} className="border-b border-[var(--border)]">
-              {/* Symbol row */}
               <div className="px-3 py-2.5">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
@@ -435,70 +467,41 @@ function MarketsScreen({
                     </div>
                     <div>
                       <span className="text-white text-sm font-semibold">{symbol.symbolName}</span>
-                      <p className="text-[var(--muted-foreground)] text-xs">
-                        {symbol.description || "Forex"}
-                      </p>
+                      <p className="text-[var(--muted-foreground)] text-xs">{symbol.description || classifySymbol(symbol.symbolName)}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <div className="text-right">
-                      {spread && (
-                        <span className="text-[var(--muted-foreground)] text-xs">{spread}</span>
-                      )}
-                    </div>
+                    {spread && <span className="text-[var(--muted-foreground)] text-xs">{spread}</span>}
                     <StarIcon className="size-4 text-[var(--muted-foreground)]" />
                   </div>
                 </div>
-
-                {/* Sell / Buy buttons */}
                 <div className="flex gap-2">
-                  <button
-                    onClick={() => onOpenDeal(symbol)}
-                    className="flex-1 py-2 rounded border border-[var(--border)] bg-[var(--card)] text-center"
-                  >
+                  <button onClick={() => onOpenDeal(symbol)} className="flex-1 py-2 rounded border border-[var(--border)] bg-[var(--card)] text-center">
                     <span className="text-[var(--muted-foreground)] text-xs block">Sell</span>
-                    <span className="text-[var(--color-sell)] text-sm font-mono font-semibold tabular-nums">
-                      {formatPrice(quote?.bid, symbol.symbolId)}
-                    </span>
+                    <span className="text-[var(--color-sell)] text-sm font-mono font-semibold tabular-nums">{formatPrice(quote?.bid, symbol.symbolId)}</span>
                   </button>
-                  <button
-                    onClick={() => onOpenDeal(symbol)}
-                    className="flex-1 py-2 rounded border border-[var(--border)] bg-[var(--card)] text-center"
-                  >
+                  <button onClick={() => onOpenDeal(symbol)} className="flex-1 py-2 rounded border border-[var(--border)] bg-[var(--card)] text-center">
                     <span className="text-[var(--muted-foreground)] text-xs block">Buy</span>
-                    <span className="text-[var(--color-buy)] text-sm font-mono font-semibold tabular-nums">
-                      {formatPrice(quote?.ask, symbol.symbolId)}
-                    </span>
+                    <span className="text-[var(--color-buy)] text-sm font-mono font-semibold tabular-nums">{formatPrice(quote?.ask, symbol.symbolId)}</span>
                   </button>
                   <button className="w-8 flex items-center justify-center text-[var(--muted-foreground)]">
                     <InfoIcon className="size-4" />
                   </button>
                 </div>
-
-                {/* Positions under this symbol */}
                 {symbolPositions.map((pos) => {
                   const isBuy = pos.tradeData.tradeSide === TRADE_SIDE.BUY
                   const currentPrice = isBuy ? quote?.bid : quote?.ask
                   const pipPos = details?.pipPosition ?? 4
                   const entry = pos.price / 100000
                   const current = currentPrice ? currentPrice / 100000 : null
-                  const pnlPips = current
-                    ? isBuy
-                      ? (current - entry) * Math.pow(10, pipPos)
-                      : (entry - current) * Math.pow(10, pipPos)
-                    : null
-
+                  const pnlPips = current ? (isBuy ? (current - entry) : (entry - current)) * Math.pow(10, pipPos) : null
                   return (
                     <div key={pos.positionId} className="flex items-center gap-2 mt-1.5 pl-2 text-xs">
-                      <span className="text-[var(--muted-foreground)]">
-                        {isBuy ? "Buy" : "Sell"}
-                      </span>
-                      <span className="text-[var(--muted-foreground)]">
-                        {formatVolume(pos.tradeData.volume, pos.tradeData.symbolId)}
-                      </span>
+                      <span className="text-[var(--muted-foreground)]">{isBuy ? "Buy" : "Sell"}</span>
+                      <span className="text-[var(--muted-foreground)]">{formatVolume(pos.tradeData.volume, pos.tradeData.symbolId)}</span>
                       {pnlPips !== null && (
                         <span className={`ml-auto font-mono ${pnlPips >= 0 ? "text-[var(--color-buy)]" : "text-[var(--color-sell)]"}`}>
-                          {pnlPips >= 0 ? "" : ""}{pnlPips.toFixed(2)}
+                          {pnlPips.toFixed(2)}
                         </span>
                       )}
                     </div>
@@ -508,12 +511,14 @@ function MarketsScreen({
             </div>
           )
         })}
-        {symbols.length === 0 && (
-          <p className="text-center text-[var(--muted-foreground)] text-sm py-12">Loading symbols...</p>
+        {visibleSymbols.length === 0 && (
+          <p className="text-center text-[var(--muted-foreground)] text-sm py-12">
+            {symbols.length === 0 ? "Loading symbols..." : "No symbols in this category"}
+          </p>
         )}
       </div>
 
-      {/* Chart at bottom */}
+      {/* Chart - STICKY at bottom, never scrolls */}
       {activeChartSymbol && activeChartId && (
         <TradingChart
           symbolId={activeChartId}
@@ -1014,10 +1019,11 @@ function MenuItem({ label, badge, onClick }: { label: string; badge?: number; on
   )
 }
 
-function TabButton({ label, active }: { label: string; active?: boolean }) {
+function TabButton({ label, active, onClick }: { label: string; active?: boolean; onClick?: () => void }) {
   return (
     <button
-      className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+      onClick={onClick}
+      className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
         active
           ? "border-[var(--primary)] text-white"
           : "border-transparent text-[var(--muted-foreground)]"
