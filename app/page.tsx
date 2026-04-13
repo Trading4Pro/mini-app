@@ -1,77 +1,37 @@
 "use client"
 
-import { useEffect, useState, useMemo } from "react"
+import { useEffect, useState, useMemo, useCallback } from "react"
 import Script from "next/script"
 import { useCTrader } from "@/hooks/use-ctrader"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
-import { Separator } from "@/components/ui/separator"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import { TRADE_SIDE, ORDER_TYPE } from "@/types/ctrader"
+import type { OALightSymbol, OASymbol, OAPosition, OAOrder } from "@/types/ctrader"
 import { Spinner } from "@/components/ui/spinner"
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog"
-import { TRADE_SIDE, ORDER_TYPE } from "@/types/ctrader"
-import type { OALightSymbol, OASymbol } from "@/types/ctrader"
-import {
-  ArrowUpIcon,
-  ArrowDownIcon,
-  LogOutIcon,
+  MenuIcon,
   XIcon,
-  SearchIcon,
   ChevronLeftIcon,
-  ChevronRightIcon,
-  UserIcon,
-  BarChart3Icon,
-  ListIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  StarIcon,
+  SearchIcon,
+  InfoIcon,
 } from "lucide-react"
 
+// ============================================================
+// MAIN APP
+// ============================================================
 export default function TradingApp() {
-  const {
-    status,
-    error,
-    accessToken,
-    accounts,
-    selectedAccountId,
-    trader,
-    depositAssetName,
-    symbols,
-    symbolDetails,
-    quotes,
-    positions,
-    orders,
-    isLive,
-    setIsLive,
-    login,
-    logout,
-    connect,
-    selectAccount,
-    placeOrder,
-    closePosition,
-    cancelOrder,
-    getSymbolName,
-  } = useCTrader()
+  const ct = useCTrader()
 
   const [tgUser, setTgUser] = useState<{ first_name?: string; username?: string } | null>(null)
-  const [activeScreen, setActiveScreen] = useState<"account" | "market" | "activity">("market")
+  const [screen, setScreen] = useState<"markets" | "account" | "activity" | "deal">("markets")
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [dealSymbol, setDealSymbol] = useState<OALightSymbol | null>(null)
   const [symbolSearch, setSymbolSearch] = useState("")
-  const [orderDialog, setOrderDialog] = useState<{
-    symbol: OALightSymbol
-    details?: OASymbol
-  } | null>(null)
-  const [orderSide, setOrderSide] = useState<"BUY" | "SELL">("BUY")
-  const [orderVolume, setOrderVolume] = useState("0.01")
-  const [orderSubmitting, setOrderSubmitting] = useState(false)
-  const [orderError, setOrderError] = useState<string | null>(null)
-  const [orderSuccess, setOrderSuccess] = useState(false)
-  const [activityTab, setActivityTab] = useState<"positions" | "orders">("positions")
+  const [activityTab, setActivityTab] = useState<"positions" | "orders" | "closed">("positions")
+  const [expandedPosition, setExpandedPosition] = useState<number | null>(null)
 
-  // Initialize Telegram WebApp
+  // Telegram init
   useEffect(() => {
     if (typeof window !== "undefined" && window.Telegram?.WebApp) {
       const tg = window.Telegram.WebApp
@@ -81,179 +41,133 @@ export default function TradingApp() {
     }
   }, [])
 
-  // Auto-connect when token is available
+  // Auto-connect
   useEffect(() => {
-    if (accessToken && status === "disconnected") {
-      connect(accessToken, isLive).catch(() => {})
+    if (ct.accessToken && ct.status === "disconnected") {
+      ct.connect(ct.accessToken, ct.isLive).catch(() => {})
     }
-  }, [accessToken, status, isLive, connect])
+  }, [ct.accessToken, ct.status, ct.isLive, ct.connect])
+
+  const openDeal = useCallback((symbol: OALightSymbol) => {
+    setDealSymbol(symbol)
+    setScreen("deal")
+  }, [])
 
   const filteredSymbols = useMemo(() => {
-    if (!symbolSearch) return symbols
+    if (!symbolSearch) return ct.symbols
     const q = symbolSearch.toLowerCase()
-    return symbols.filter((s) => s.symbolName.toLowerCase().includes(q))
-  }, [symbols, symbolSearch])
+    return ct.symbols.filter((s) => s.symbolName.toLowerCase().includes(q))
+  }, [ct.symbols, symbolSearch])
 
-  const formatPrice = (price: number | undefined, symbolId: number) => {
+  const formatPrice = useCallback((price: number | undefined, symbolId: number) => {
     if (price === undefined) return "—"
-    const details = symbolDetails.get(symbolId)
+    const details = ct.symbolDetails.get(symbolId)
     const digits = details?.digits ?? 5
     return (price / 100000).toFixed(digits)
-  }
+  }, [ct.symbolDetails])
 
-  const formatMoney = (amount: number, digits = 2) => {
+  const formatMoney = useCallback((amount: number, digits = 2) => {
     return (amount / Math.pow(10, digits)).toFixed(2)
-  }
+  }, [])
 
-  const formatVolume = (volumeInCents: number, symbolId: number) => {
-    const details = symbolDetails.get(symbolId)
+  const formatVolume = useCallback((volumeInCents: number, symbolId: number) => {
+    const details = ct.symbolDetails.get(symbolId)
     const lotSize = details?.lotSize ?? 100000
-    return (volumeInCents / 100 / lotSize).toFixed(2)
-  }
+    const lots = volumeInCents / 100 / lotSize
+    // Show in units (volume in base currency)
+    return (volumeInCents / 100).toLocaleString()
+  }, [ct.symbolDetails])
 
-  const handlePlaceOrder = async () => {
-    if (!orderDialog) return
-    setOrderSubmitting(true)
-    setOrderError(null)
-    setOrderSuccess(false)
-    try {
-      const details = symbolDetails.get(orderDialog.symbol.symbolId)
-      const lotSize = details?.lotSize ?? 100000
-      const volumeInCents = Math.round(parseFloat(orderVolume) * lotSize * 100)
-
-      const res = await placeOrder({
-        symbolId: orderDialog.symbol.symbolId,
-        tradeSide: orderSide === "BUY" ? TRADE_SIDE.BUY : TRADE_SIDE.SELL,
-        volume: volumeInCents,
-        orderType: ORDER_TYPE.MARKET,
-      })
-
-      console.log("[cTrader] Order response:", res)
-
-      // Check for error responses
-      if (res.payloadType === 2132 || res.payloadType === 2142) {
-        // ORDER_ERROR_EVENT or general error
-        const errMsg = (res.description as string) || (res.errorCode as string) || "Order rejected"
-        setOrderError(errMsg)
-      } else if (res.payloadType === 2126) {
-        // EXECUTION_EVENT - order was processed
-        const execType = res.executionType as string
-        if (execType === "ORDER_FILLED" || execType === "ORDER_ACCEPTED") {
-          setOrderSuccess(true)
-          setTimeout(() => setOrderDialog(null), 1200)
-        } else if (execType === "ORDER_REJECTED" || execType === "ORDER_CANCELLED") {
-          setOrderError(`Order ${execType.toLowerCase().replace("order_", "")}`)
-        }
-      } else {
-        // Unknown response but no error - assume success
-        setOrderSuccess(true)
-        setTimeout(() => setOrderDialog(null), 1200)
-      }
-    } catch (err) {
-      console.error("Order failed:", err)
-      setOrderError(err instanceof Error ? err.message : "Order failed")
-    } finally {
-      setOrderSubmitting(false)
-    }
-  }
-
-  // Calculate total P&L
-  const totalPnl = useMemo(() => {
-    let total = 0
-    positions.forEach((pos) => {
-      const quote = quotes.get(pos.tradeData.symbolId)
-      const isBuy = pos.tradeData.tradeSide === TRADE_SIDE.BUY
-      const currentPrice = isBuy ? quote?.bid : quote?.ask
-      if (currentPrice) {
-        const details = symbolDetails.get(pos.tradeData.symbolId)
-        const pipPos = details?.pipPosition ?? 4
-        const entry = pos.price / 100000
-        const current = currentPrice / 100000
-        const pips = isBuy ? (current - entry) * Math.pow(10, pipPos) : (entry - current) * Math.pow(10, pipPos)
-        total += pips
-      }
-    })
-    return total
-  }, [positions, quotes, symbolDetails])
-
-  // ---- Login Screen ----
-  if (!accessToken) {
+  // ---- LOGIN ----
+  if (!ct.accessToken) {
     return (
       <>
         <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
-        <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-background text-foreground">
-          <div className="text-center space-y-8 max-w-sm w-full">
-            {/* Logo area */}
-            <div className="space-y-2">
-              <div className="w-20 h-20 mx-auto rounded-2xl bg-primary/10 flex items-center justify-center">
-                <BarChart3Icon className="size-10 text-primary" />
+        <main className="min-h-screen flex flex-col items-center justify-center px-6 bg-[var(--background)]">
+          <div className="text-center space-y-6 max-w-sm w-full">
+            {/* Logo */}
+            <div className="space-y-1">
+              <div className="w-16 h-16 mx-auto mb-4">
+                <svg viewBox="0 0 64 64" className="w-full h-full">
+                  <circle cx="32" cy="32" r="28" fill="none" stroke="#ff4444" strokeWidth="3" />
+                  <path d="M32 12 L32 20 M32 44 L32 52 M12 32 L20 32 M44 32 L52 32" stroke="#ff4444" strokeWidth="3" strokeLinecap="round" />
+                  <circle cx="32" cy="32" r="8" fill="#ff4444" />
+                </svg>
               </div>
-              <h1 className="text-2xl font-bold">cTrader</h1>
-              <p className="text-muted-foreground text-sm">
-                {tgUser ? `Hello, ${tgUser.first_name || tgUser.username}!` : "Sign in to start trading"}
-              </p>
+              <h1 className="text-xl font-bold text-white">cTrader</h1>
+              <p className="text-[var(--muted-foreground)] text-sm">Open source example</p>
             </div>
 
-            {/* Demo / Live toggle */}
-            <div className="flex items-center justify-center gap-1 bg-muted rounded-lg p-1">
+            <p className="text-[var(--muted-foreground)] text-sm">
+              To experience all the features offered by this app please:
+            </p>
+
+            {/* Demo/Live toggle */}
+            <div className="flex gap-2 justify-center">
               <button
-                className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-                  !isLive ? "bg-background shadow-sm text-foreground" : "text-muted-foreground"
+                className={`px-6 py-2 rounded text-sm font-medium border transition-colors ${
+                  !ct.isLive ? "bg-[var(--primary)] text-white border-[var(--primary)]" : "border-[var(--border)] text-[var(--muted-foreground)]"
                 }`}
-                onClick={() => setIsLive(false)}
+                onClick={() => ct.setIsLive(false)}
               >
                 Demo
               </button>
               <button
-                className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-                  isLive ? "bg-background shadow-sm text-foreground" : "text-muted-foreground"
+                className={`px-6 py-2 rounded text-sm font-medium border transition-colors ${
+                  ct.isLive ? "bg-[var(--primary)] text-white border-[var(--primary)]" : "border-[var(--border)] text-[var(--muted-foreground)]"
                 }`}
-                onClick={() => setIsLive(true)}
+                onClick={() => ct.setIsLive(true)}
               >
                 Live
               </button>
             </div>
 
-            <Button onClick={login} size="lg" className="w-full h-12 text-base">
-              Sign In
-            </Button>
+            <button
+              onClick={ct.login}
+              className="w-full py-3 border border-[var(--primary)] text-[var(--primary)] rounded-lg font-medium text-sm hover:bg-[var(--primary)] hover:text-white transition-colors"
+            >
+              Log in with your cTrader account
+            </button>
           </div>
         </main>
       </>
     )
   }
 
-  // ---- Connecting/Auth Screen ----
-  if (status === "connecting" || status === "authenticating") {
+  // ---- CONNECTING ----
+  if (ct.status === "connecting" || ct.status === "authenticating") {
     return (
       <>
         <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
-        <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-background text-foreground">
-          <Spinner className="h-8 w-8" />
-          <p className="text-muted-foreground mt-3">
-            {status === "connecting" ? "Connecting..." : "Authenticating..."}
+        <main className="min-h-screen flex flex-col items-center justify-center bg-[var(--background)]">
+          <Spinner className="h-8 w-8 text-[var(--primary)]" />
+          <p className="text-[var(--muted-foreground)] mt-3 text-sm">
+            {ct.status === "connecting" ? "Connecting..." : "Authenticating..."}
           </p>
         </main>
       </>
     )
   }
 
-  // ---- Error Screen ----
-  if (status === "error") {
+  // ---- ERROR ----
+  if (ct.status === "error") {
     return (
       <>
         <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
-        <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-background text-foreground">
+        <main className="min-h-screen flex flex-col items-center justify-center px-6 bg-[var(--background)]">
           <div className="text-center space-y-4 max-w-sm">
-            <p className="text-destructive font-medium">Connection failed</p>
-            <p className="text-muted-foreground text-sm break-words">{error}</p>
-            <div className="flex gap-2 justify-center">
-              <Button variant="outline" onClick={() => connect(accessToken!, isLive)}>
+            <p className="text-[var(--destructive)] font-medium">Connection failed</p>
+            <p className="text-[var(--muted-foreground)] text-sm break-words">{ct.error}</p>
+            <div className="flex gap-3 justify-center">
+              <button
+                onClick={() => ct.connect(ct.accessToken!, ct.isLive)}
+                className="px-6 py-2 border border-[var(--border)] rounded text-sm text-white"
+              >
                 Retry
-              </Button>
-              <Button variant="ghost" onClick={logout}>
+              </button>
+              <button onClick={ct.logout} className="px-6 py-2 text-sm text-[var(--muted-foreground)]">
                 Logout
-              </Button>
+              </button>
             </div>
           </div>
         </main>
@@ -261,569 +175,853 @@ export default function TradingApp() {
     )
   }
 
-  // ---- Account Selection ----
-  if (!selectedAccountId && accounts.length > 0) {
+  // ---- ACCOUNT SELECTION ----
+  if (!ct.selectedAccountId && ct.accounts.length > 0) {
     return (
       <>
         <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
-        <main className="min-h-screen flex flex-col bg-background text-foreground">
-          <div className="p-4 border-b">
-            <h2 className="text-lg font-bold">Select Account</h2>
+        <main className="min-h-screen flex flex-col bg-[var(--background)]">
+          <div className="h-12 flex items-center justify-center border-b border-[var(--border)]">
+            <span className="text-white font-medium">Select Account</span>
           </div>
-          <ScrollArea className="flex-1">
-            <div className="p-3 space-y-2">
-              {accounts.map((acc) => (
-                <button
-                  key={acc.ctidTraderAccountId}
-                  className="w-full p-4 rounded-xl border hover:border-primary/50 transition-colors text-left bg-card"
-                  onClick={() => selectAccount(acc.ctidTraderAccountId)}
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold text-sm">Account {acc.traderLogin}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        ID: {acc.ctidTraderAccountId}
-                      </p>
-                    </div>
-                    <Badge
-                      variant={acc.isLive ? "default" : "secondary"}
-                      className={acc.isLive ? "bg-green-600" : ""}
-                    >
-                      {acc.isLive ? "Live" : "Demo"}
-                    </Badge>
+          <div className="flex-1 p-3 space-y-2">
+            {ct.accounts.map((acc) => (
+              <button
+                key={acc.ctidTraderAccountId}
+                className="w-full p-4 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] transition-colors text-left"
+                onClick={() => ct.selectAccount(acc.ctidTraderAccountId)}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-white text-sm font-medium">{acc.traderLogin}</span>
+                    <p className="text-[var(--muted-foreground)] text-xs mt-0.5">
+                      ID: {acc.ctidTraderAccountId}
+                    </p>
                   </div>
-                </button>
-              ))}
-            </div>
-          </ScrollArea>
-          <div className="p-3 border-t">
-            <Button variant="ghost" size="sm" className="w-full" onClick={logout}>
-              <LogOutIcon className="size-4" />
-              Disconnect
-            </Button>
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+                    acc.isLive ? "bg-[var(--color-buy)]/20 text-[var(--color-buy)]" : "bg-[var(--accent)] text-[var(--muted-foreground)]"
+                  }`}>
+                    {acc.isLive ? "Live" : "Demo"}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+          <div className="p-3 border-t border-[var(--border)]">
+            <button onClick={ct.logout} className="w-full py-2 text-[var(--muted-foreground)] text-sm">
+              Log out
+            </button>
           </div>
         </main>
       </>
     )
   }
 
-  // ---- Main Trading Interface (3-screen layout) ----
-  const moneyDigits = trader?.moneyDigits ?? 2
+  // ============================================================
+  // MAIN TRADING APP
+  // ============================================================
+  const moneyDigits = ct.trader?.moneyDigits ?? 2
 
   return (
     <>
       <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
-      <main className="min-h-screen flex flex-col bg-background text-foreground">
-        {/* Error banner */}
-        {error && (
-          <div className="px-3 py-2 bg-destructive/10 text-destructive text-xs">
-            {error}
+      <main className="min-h-screen flex flex-col bg-[var(--background)] text-white">
+        {/* ---- MENU OVERLAY ---- */}
+        {menuOpen && (
+          <div className="fixed inset-0 z-50 flex">
+            <div className="w-72 bg-[var(--card)] flex flex-col h-full shadow-2xl">
+              <div className="h-12 flex items-center justify-between px-4 border-b border-[var(--border)]">
+                <span className="font-medium">Menu</span>
+                <button onClick={() => setMenuOpen(false)}>
+                  <XIcon className="size-5 text-[var(--muted-foreground)]" />
+                </button>
+              </div>
+              <div className="p-4">
+                <p className="text-[var(--muted-foreground)] text-sm">
+                  Hello, {tgUser?.first_name || tgUser?.username || "Trader"}
+                </p>
+              </div>
+              <nav className="flex-1">
+                <MenuItem label="Markets" onClick={() => { setScreen("markets"); setMenuOpen(false) }} />
+                <MenuItem label="My account" onClick={() => { setScreen("account"); setMenuOpen(false) }} />
+                <MenuItem
+                  label="My activity"
+                  badge={ct.positions.length + ct.orders.length}
+                  onClick={() => { setScreen("activity"); setMenuOpen(false) }}
+                />
+              </nav>
+              <div className="border-t border-[var(--border)] p-4">
+                <button onClick={ct.logout} className="text-[var(--muted-foreground)] text-sm">
+                  Log out
+                </button>
+              </div>
+              <div className="px-4 pb-4">
+                <span className="text-[var(--primary)] text-xs">Open API support</span>
+              </div>
+            </div>
+            <div className="flex-1 bg-black/50" onClick={() => setMenuOpen(false)} />
           </div>
         )}
 
-        {/* Screen content */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* ===== ACCOUNT SCREEN ===== */}
-          {activeScreen === "account" && (
-            <div className="flex-1 flex flex-col">
-              <div className="p-4 border-b flex items-center justify-between">
-                <h2 className="text-lg font-bold">Account</h2>
-                <Button variant="ghost" size="icon-sm" onClick={logout}>
-                  <LogOutIcon className="size-4" />
-                </Button>
-              </div>
-              <ScrollArea className="flex-1">
-                <div className="p-4 space-y-4">
-                  {/* Account badge */}
-                  <div className="flex items-center gap-2">
-                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                      <UserIcon className="size-5 text-primary" />
-                    </div>
-                    <div>
-                      <p className="font-semibold text-sm">Account {trader?.ctidTraderAccountId}</p>
-                      <Badge variant={isLive ? "default" : "secondary"} className={`text-xs ${isLive ? "bg-green-600" : ""}`}>
-                        {isLive ? "Live" : "Demo"}
-                      </Badge>
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  {/* Account metrics */}
-                  {trader && (
-                    <div className="space-y-3">
-                      <AccountRow label="Balance" value={`${formatMoney(trader.balance, moneyDigits)} ${depositAssetName}`} />
-                      <AccountRow label="Leverage" value={`1:${trader.leverageInCents / 100}`} />
-                      <AccountRow label="Bonus" value={formatMoney(trader.managerBonus + trader.ibBonus, moneyDigits)} />
-                      <Separator />
-                      <AccountRow
-                        label="Unrealized P&L"
-                        value={`${totalPnl >= 0 ? "+" : ""}${totalPnl.toFixed(1)} pips`}
-                        valueColor={totalPnl >= 0 ? "text-green-500" : "text-red-500"}
-                      />
-                      <AccountRow label="Open Positions" value={String(positions.length)} />
-                      <AccountRow label="Pending Orders" value={String(orders.length)} />
-                    </div>
-                  )}
-                </div>
-              </ScrollArea>
-            </div>
-          )}
-
-          {/* ===== MARKET SCREEN ===== */}
-          {activeScreen === "market" && (
-            <div className="flex-1 flex flex-col">
-              {/* Search */}
-              <div className="p-3 border-b">
-                <div className="relative">
-                  <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search symbols..."
-                    value={symbolSearch}
-                    onChange={(e) => setSymbolSearch(e.target.value)}
-                    className="pl-8 h-9 text-sm"
-                  />
-                </div>
-              </div>
-
-              {/* Floating P&L overlay */}
-              {positions.length > 0 && (
-                <div className="px-3 py-1.5 border-b bg-muted/50 flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">
-                    {positions.length} position{positions.length !== 1 ? "s" : ""}
-                  </span>
-                  <span className={`text-xs font-semibold font-mono ${totalPnl >= 0 ? "text-green-500" : "text-red-500"}`}>
-                    {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(1)} pips
-                  </span>
-                </div>
-              )}
-
-              {/* Symbol list */}
-              <ScrollArea className="flex-1">
-                <div className="divide-y">
-                  {filteredSymbols.map((symbol) => {
-                    const quote = quotes.get(symbol.symbolId)
-                    const hasPosition = positions.some((p) => p.tradeData.symbolId === symbol.symbolId)
-                    return (
-                      <button
-                        key={symbol.symbolId}
-                        className="w-full px-3 py-3 flex items-center justify-between hover:bg-accent/50 transition-colors text-left"
-                        onClick={() => {
-                          setOrderError(null)
-                          setOrderSuccess(false)
-                          setOrderDialog({
-                            symbol,
-                            details: symbolDetails.get(symbol.symbolId),
-                          })
-                        }}
-                      >
-                        <div className="flex items-center gap-2">
-                          {hasPosition && (
-                            <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                          )}
-                          <div>
-                            <p className="text-sm font-medium">{symbol.symbolName}</p>
-                            {symbol.description && (
-                              <p className="text-xs text-muted-foreground truncate max-w-[140px]">
-                                {symbol.description}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex gap-3">
-                          <div className="text-right">
-                            <p className="text-xs text-muted-foreground">Bid</p>
-                            <p className="text-sm font-mono tabular-nums text-blue-500">
-                              {formatPrice(quote?.bid, symbol.symbolId)}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-xs text-muted-foreground">Ask</p>
-                            <p className="text-sm font-mono tabular-nums text-red-500">
-                              {formatPrice(quote?.ask, symbol.symbolId)}
-                            </p>
-                          </div>
-                        </div>
-                      </button>
-                    )
-                  })}
-                  {filteredSymbols.length === 0 && (
-                    <p className="text-center text-muted-foreground text-sm py-8">
-                      {symbols.length === 0 ? "Loading symbols..." : "No symbols found"}
-                    </p>
-                  )}
-                </div>
-              </ScrollArea>
-            </div>
-          )}
-
-          {/* ===== ACTIVITY SCREEN ===== */}
-          {activeScreen === "activity" && (
-            <div className="flex-1 flex flex-col">
-              {/* Tabs */}
-              <div className="flex border-b">
-                <button
-                  className={`flex-1 py-3 text-sm font-medium border-b-2 transition-colors ${
-                    activityTab === "positions"
-                      ? "border-primary text-foreground"
-                      : "border-transparent text-muted-foreground"
-                  }`}
-                  onClick={() => setActivityTab("positions")}
-                >
-                  Positions ({positions.length})
-                </button>
-                <button
-                  className={`flex-1 py-3 text-sm font-medium border-b-2 transition-colors ${
-                    activityTab === "orders"
-                      ? "border-primary text-foreground"
-                      : "border-transparent text-muted-foreground"
-                  }`}
-                  onClick={() => setActivityTab("orders")}
-                >
-                  Orders ({orders.length})
-                </button>
-              </div>
-
-              <ScrollArea className="flex-1">
-                {activityTab === "positions" && (
-                  <div className="divide-y">
-                    {positions.map((pos) => {
-                      const quote = quotes.get(pos.tradeData.symbolId)
-                      const isBuy = pos.tradeData.tradeSide === TRADE_SIDE.BUY
-                      const currentPrice = isBuy ? quote?.bid : quote?.ask
-                      const details = symbolDetails.get(pos.tradeData.symbolId)
-                      const digits = details?.digits ?? 5
-                      const pipPos = details?.pipPosition ?? 4
-                      const entryPrice = pos.price / 100000
-                      const current = currentPrice ? currentPrice / 100000 : null
-                      const pnlPips = current
-                        ? isBuy
-                          ? (current - entryPrice) * Math.pow(10, pipPos)
-                          : (entryPrice - current) * Math.pow(10, pipPos)
-                        : null
-
-                      return (
-                        <div key={pos.positionId} className="px-3 py-3">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2.5">
-                              <Badge
-                                className={`text-xs px-1.5 py-0.5 ${
-                                  isBuy
-                                    ? "bg-green-600 text-white border-green-600"
-                                    : "bg-red-600 text-white border-red-600"
-                                }`}
-                              >
-                                {isBuy ? "BUY" : "SELL"}
-                              </Badge>
-                              <div>
-                                <p className="text-sm font-medium">
-                                  {getSymbolName(pos.tradeData.symbolId)}
-                                </p>
-                                <p className="text-xs text-muted-foreground">
-                                  {formatVolume(pos.tradeData.volume, pos.tradeData.symbolId)} lots @ {entryPrice.toFixed(digits)}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {pnlPips !== null && (
-                                <span
-                                  className={`text-sm font-mono font-semibold tabular-nums ${
-                                    pnlPips >= 0 ? "text-green-500" : "text-red-500"
-                                  }`}
-                                >
-                                  {pnlPips >= 0 ? "+" : ""}{pnlPips.toFixed(1)}
-                                </span>
-                              )}
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                className="text-muted-foreground hover:text-destructive"
-                                onClick={() => closePosition(pos.positionId, pos.tradeData.volume)}
-                              >
-                                <XIcon className="size-4" />
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      )
-                    })}
-                    {positions.length === 0 && (
-                      <p className="text-center text-muted-foreground text-sm py-12">
-                        No open positions
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {activityTab === "orders" && (
-                  <div className="divide-y">
-                    {orders.map((ord) => {
-                      const isBuy = ord.tradeData.tradeSide === TRADE_SIDE.BUY
-                      const details = symbolDetails.get(ord.tradeData.symbolId)
-                      const digits = details?.digits ?? 5
-                      const price = ord.limitPrice ?? ord.stopPrice ?? 0
-                      const typeLabel = ord.orderType === 2 ? "Limit" : ord.orderType === 3 ? "Stop" : "Market"
-
-                      return (
-                        <div key={ord.orderId} className="px-3 py-3">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2.5">
-                              <Badge
-                                className={`text-xs px-1.5 py-0.5 ${
-                                  isBuy
-                                    ? "bg-green-600 text-white border-green-600"
-                                    : "bg-red-600 text-white border-red-600"
-                                }`}
-                              >
-                                {isBuy ? "BUY" : "SELL"}
-                              </Badge>
-                              <div>
-                                <p className="text-sm font-medium">
-                                  {getSymbolName(ord.tradeData.symbolId)}
-                                </p>
-                                <p className="text-xs text-muted-foreground">
-                                  {typeLabel} {formatVolume(ord.tradeData.volume, ord.tradeData.symbolId)} lots
-                                  {price > 0 && ` @ ${(price / 100000).toFixed(digits)}`}
-                                </p>
-                              </div>
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              className="text-muted-foreground hover:text-destructive"
-                              onClick={() => cancelOrder(ord.orderId)}
-                            >
-                              <XIcon className="size-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      )
-                    })}
-                    {orders.length === 0 && (
-                      <p className="text-center text-muted-foreground text-sm py-12">
-                        No pending orders
-                      </p>
-                    )}
-                  </div>
-                )}
-              </ScrollArea>
-            </div>
-          )}
-        </div>
-
-        {/* Bottom Navigation Bar */}
-        <div className="border-t bg-card">
-          <div className="flex">
-            <NavButton
-              icon={<UserIcon className="size-5" />}
-              label="Account"
-              active={activeScreen === "account"}
-              onClick={() => setActiveScreen("account")}
-            />
-            <NavButton
-              icon={<BarChart3Icon className="size-5" />}
-              label="Market"
-              active={activeScreen === "market"}
-              onClick={() => setActiveScreen("market")}
-            />
-            <NavButton
-              icon={<ListIcon className="size-5" />}
-              label="Activity"
-              active={activeScreen === "activity"}
-              onClick={() => setActiveScreen("activity")}
-              badge={positions.length > 0 ? positions.length : undefined}
-            />
-          </div>
-        </div>
-
-        {/* Order Dialog */}
-        <Dialog open={!!orderDialog} onOpenChange={(open) => !open && setOrderDialog(null)}>
-          <DialogContent className="max-w-[calc(100%-2rem)]">
-            <DialogHeader>
-              <DialogTitle className="text-center">{orderDialog?.symbol.symbolName}</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              {/* Bid/Ask display */}
-              {orderDialog && (
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="p-3 rounded-lg bg-muted text-center">
-                    <p className="text-xs text-muted-foreground mb-1">Bid</p>
-                    <p className="text-xl font-mono tabular-nums font-bold text-blue-500">
-                      {formatPrice(
-                        quotes.get(orderDialog.symbol.symbolId)?.bid,
-                        orderDialog.symbol.symbolId
-                      )}
-                    </p>
-                  </div>
-                  <div className="p-3 rounded-lg bg-muted text-center">
-                    <p className="text-xs text-muted-foreground mb-1">Ask</p>
-                    <p className="text-xl font-mono tabular-nums font-bold text-red-500">
-                      {formatPrice(
-                        quotes.get(orderDialog.symbol.symbolId)?.ask,
-                        orderDialog.symbol.symbolId
-                      )}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Buy / Sell toggle */}
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  className={`py-3 rounded-lg text-sm font-bold transition-colors ${
-                    orderSide === "BUY"
-                      ? "bg-green-600 text-white"
-                      : "bg-muted text-muted-foreground"
-                  }`}
-                  onClick={() => setOrderSide("BUY")}
-                >
-                  BUY
-                </button>
-                <button
-                  className={`py-3 rounded-lg text-sm font-bold transition-colors ${
-                    orderSide === "SELL"
-                      ? "bg-red-600 text-white"
-                      : "bg-muted text-muted-foreground"
-                  }`}
-                  onClick={() => setOrderSide("SELL")}
-                >
-                  SELL
-                </button>
-              </div>
-
-              {/* Volume */}
-              <div>
-                <label className="text-xs text-muted-foreground mb-1.5 block">
-                  Trading Amount (lots)
-                </label>
-                <div className="flex items-center gap-2">
-                  <button
-                    className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center text-lg font-bold hover:bg-accent transition-colors"
-                    onClick={() =>
-                      setOrderVolume((v) => Math.max(0.01, parseFloat(v) - 0.01).toFixed(2))
-                    }
-                  >
-                    −
-                  </button>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    value={orderVolume}
-                    onChange={(e) => setOrderVolume(e.target.value)}
-                    className="text-center text-lg font-mono font-bold h-10"
-                  />
-                  <button
-                    className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center text-lg font-bold hover:bg-accent transition-colors"
-                    onClick={() =>
-                      setOrderVolume((v) => (parseFloat(v) + 0.01).toFixed(2))
-                    }
-                  >
-                    +
-                  </button>
-                </div>
-                <div className="flex gap-1 mt-2">
-                  {["0.01", "0.05", "0.10", "0.50", "1.00"].map((v) => (
-                    <button
-                      key={v}
-                      className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                        orderVolume === v
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-muted text-muted-foreground hover:bg-accent"
-                      }`}
-                      onClick={() => setOrderVolume(v)}
-                    >
-                      {v}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Order feedback */}
-            {orderError && (
-              <div className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20">
-                <p className="text-red-500 text-sm text-center">{orderError}</p>
-              </div>
-            )}
-            {orderSuccess && (
-              <div className="px-3 py-2 rounded-lg bg-green-500/10 border border-green-500/20">
-                <p className="text-green-500 text-sm text-center font-medium">Order filled!</p>
-              </div>
-            )}
-
-            <DialogFooter className="mt-2">
-              <button
-                className={`w-full py-3 rounded-lg font-bold text-white text-sm transition-colors disabled:opacity-50 ${
-                  orderSide === "BUY"
-                    ? "bg-green-600 hover:bg-green-700"
-                    : "bg-red-600 hover:bg-red-700"
-                }`}
-                onClick={handlePlaceOrder}
-                disabled={orderSubmitting || orderSuccess}
-              >
-                {orderSubmitting ? (
-                  <Spinner className="size-5 mx-auto" />
-                ) : (
-                  `${orderSide} ${orderVolume} lots`
-                )}
+        {/* ---- DEAL SCREEN ---- */}
+        {screen === "deal" && dealSymbol ? (
+          <DealScreen
+            symbol={dealSymbol}
+            ct={ct}
+            formatPrice={formatPrice}
+            onBack={() => setScreen("markets")}
+          />
+        ) : (
+          <>
+            {/* HEADER */}
+            <div className="h-12 flex items-center px-4 border-b border-[var(--border)] shrink-0">
+              <button onClick={() => setMenuOpen(true)} className="mr-3">
+                <MenuIcon className="size-5 text-[var(--muted-foreground)]" />
               </button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              <span className="flex-1 text-center font-medium text-sm">
+                {screen === "markets" ? "Markets" : screen === "account" ? "My account" : "My activity"}
+              </span>
+              <div className="w-5" />
+            </div>
+
+            {/* ERROR BANNER */}
+            {ct.error && (
+              <div className="px-4 py-2 bg-[var(--destructive)]/10 text-[var(--destructive)] text-xs">
+                {ct.error}
+              </div>
+            )}
+
+            {/* SCREEN CONTENT */}
+            <div className="flex-1 overflow-y-auto">
+              {screen === "markets" && (
+                <MarketsScreen
+                  symbols={filteredSymbols}
+                  quotes={ct.quotes}
+                  positions={ct.positions}
+                  symbolDetails={ct.symbolDetails}
+                  symbolSearch={symbolSearch}
+                  setSymbolSearch={setSymbolSearch}
+                  formatPrice={formatPrice}
+                  formatVolume={formatVolume}
+                  getSymbolName={ct.getSymbolName}
+                  onOpenDeal={openDeal}
+                />
+              )}
+              {screen === "account" && (
+                <AccountScreen
+                  trader={ct.trader}
+                  depositAssetName={ct.depositAssetName}
+                  isLive={ct.isLive}
+                  positions={ct.positions}
+                  orders={ct.orders}
+                  formatMoney={formatMoney}
+                  moneyDigits={moneyDigits}
+                  userName={tgUser?.first_name || tgUser?.username || "Trader"}
+                />
+              )}
+              {screen === "activity" && (
+                <ActivityScreen
+                  positions={ct.positions}
+                  orders={ct.orders}
+                  quotes={ct.quotes}
+                  symbolDetails={ct.symbolDetails}
+                  getSymbolName={ct.getSymbolName}
+                  formatPrice={formatPrice}
+                  formatVolume={formatVolume}
+                  closePosition={ct.closePosition}
+                  cancelOrder={ct.cancelOrder}
+                  activityTab={activityTab}
+                  setActivityTab={setActivityTab}
+                  expandedPosition={expandedPosition}
+                  setExpandedPosition={setExpandedPosition}
+                />
+              )}
+            </div>
+
+            {/* FOOTER */}
+            <div className="h-10 flex items-center justify-between px-4 border-t border-[var(--border)] shrink-0">
+              <span className="text-[var(--muted-foreground)] text-xs font-medium">Sources and details</span>
+              <div className="flex items-center gap-1.5">
+                <svg viewBox="0 0 20 20" className="w-4 h-4">
+                  <circle cx="10" cy="10" r="7" fill="none" stroke="#ff4444" strokeWidth="1.5" />
+                  <circle cx="10" cy="10" r="2.5" fill="#ff4444" />
+                </svg>
+                <span className="text-[var(--muted-foreground)] text-xs font-medium">Open API</span>
+              </div>
+            </div>
+          </>
+        )}
       </main>
     </>
   )
 }
 
-// ---- Helper Components ----
-
-function AccountRow({
-  label,
-  value,
-  valueColor,
+// ============================================================
+// MARKETS SCREEN
+// ============================================================
+function MarketsScreen({
+  symbols, quotes, positions, symbolDetails, symbolSearch, setSymbolSearch,
+  formatPrice, formatVolume, getSymbolName, onOpenDeal,
 }: {
-  label: string
-  value: string
-  valueColor?: string
+  symbols: OALightSymbol[]
+  quotes: Map<number, { bid?: number; ask?: number; timestamp: number }>
+  positions: OAPosition[]
+  symbolDetails: Map<number, OASymbol>
+  symbolSearch: string
+  setSymbolSearch: (v: string) => void
+  formatPrice: (price: number | undefined, symbolId: number) => string
+  formatVolume: (vol: number, symbolId: number) => string
+  getSymbolName: (id: number) => string
+  onOpenDeal: (symbol: OALightSymbol) => void
 }) {
   return (
-    <div className="flex items-center justify-between">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className={`text-sm font-medium font-mono ${valueColor || ""}`}>{value}</span>
+    <div className="flex flex-col">
+      {/* Search */}
+      <div className="p-3">
+        <div className="relative">
+          <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-[var(--muted-foreground)]" />
+          <input
+            placeholder="Search symbols..."
+            value={symbolSearch}
+            onChange={(e) => setSymbolSearch(e.target.value)}
+            className="w-full h-9 pl-9 pr-3 rounded-lg bg-[var(--card)] border border-[var(--border)] text-white text-sm placeholder:text-[var(--muted-foreground)] outline-none focus:border-[var(--primary)]"
+          />
+        </div>
+      </div>
+
+      {/* Category tabs */}
+      <div className="flex gap-0 px-3 border-b border-[var(--border)]">
+        <TabButton label="Favorites" active />
+        <TabButton label="Forex" />
+        <TabButton label="Metals" />
+        <TabButton label="Indices" />
+      </div>
+
+      {/* Symbol list */}
+      <div>
+        {symbols.map((symbol) => {
+          const quote = quotes.get(symbol.symbolId)
+          const details = symbolDetails.get(symbol.symbolId)
+          const symbolPositions = positions.filter(
+            (p) => p.tradeData.symbolId === symbol.symbolId
+          )
+
+          // Calculate spread
+          const bid = quote?.bid ? quote.bid / 100000 : undefined
+          const ask = quote?.ask ? quote.ask / 100000 : undefined
+          const spread = bid && ask ? (ask - bid).toFixed(details?.digits ?? 5) : undefined
+
+          return (
+            <div key={symbol.symbolId} className="border-b border-[var(--border)]">
+              {/* Symbol row */}
+              <div className="px-3 py-2.5">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded bg-[var(--accent)] flex items-center justify-center text-xs font-bold text-[var(--muted-foreground)]">
+                      {symbol.symbolName.slice(0, 2)}
+                    </div>
+                    <div>
+                      <span className="text-white text-sm font-semibold">{symbol.symbolName}</span>
+                      <p className="text-[var(--muted-foreground)] text-xs">
+                        {symbol.description || "Forex"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      {spread && (
+                        <span className="text-[var(--muted-foreground)] text-xs">{spread}</span>
+                      )}
+                    </div>
+                    <StarIcon className="size-4 text-[var(--muted-foreground)]" />
+                  </div>
+                </div>
+
+                {/* Sell / Buy buttons */}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => onOpenDeal(symbol)}
+                    className="flex-1 py-2 rounded border border-[var(--border)] bg-[var(--card)] text-center"
+                  >
+                    <span className="text-[var(--muted-foreground)] text-xs block">Sell</span>
+                    <span className="text-[var(--color-sell)] text-sm font-mono font-semibold tabular-nums">
+                      {formatPrice(quote?.bid, symbol.symbolId)}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => onOpenDeal(symbol)}
+                    className="flex-1 py-2 rounded border border-[var(--border)] bg-[var(--card)] text-center"
+                  >
+                    <span className="text-[var(--muted-foreground)] text-xs block">Buy</span>
+                    <span className="text-[var(--color-buy)] text-sm font-mono font-semibold tabular-nums">
+                      {formatPrice(quote?.ask, symbol.symbolId)}
+                    </span>
+                  </button>
+                  <button className="w-8 flex items-center justify-center text-[var(--muted-foreground)]">
+                    <InfoIcon className="size-4" />
+                  </button>
+                </div>
+
+                {/* Positions under this symbol */}
+                {symbolPositions.map((pos) => {
+                  const isBuy = pos.tradeData.tradeSide === TRADE_SIDE.BUY
+                  const currentPrice = isBuy ? quote?.bid : quote?.ask
+                  const pipPos = details?.pipPosition ?? 4
+                  const entry = pos.price / 100000
+                  const current = currentPrice ? currentPrice / 100000 : null
+                  const pnlPips = current
+                    ? isBuy
+                      ? (current - entry) * Math.pow(10, pipPos)
+                      : (entry - current) * Math.pow(10, pipPos)
+                    : null
+
+                  return (
+                    <div key={pos.positionId} className="flex items-center gap-2 mt-1.5 pl-2 text-xs">
+                      <span className="text-[var(--muted-foreground)]">
+                        {isBuy ? "Buy" : "Sell"}
+                      </span>
+                      <span className="text-[var(--muted-foreground)]">
+                        {formatVolume(pos.tradeData.volume, pos.tradeData.symbolId)}
+                      </span>
+                      {pnlPips !== null && (
+                        <span className={`ml-auto font-mono ${pnlPips >= 0 ? "text-[var(--color-buy)]" : "text-[var(--color-sell)]"}`}>
+                          {pnlPips >= 0 ? "" : ""}{pnlPips.toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+        {symbols.length === 0 && (
+          <p className="text-center text-[var(--muted-foreground)] text-sm py-12">Loading symbols...</p>
+        )}
+      </div>
     </div>
   )
 }
 
-function NavButton({
-  icon,
-  label,
-  active,
-  onClick,
-  badge,
+// ============================================================
+// DEAL SCREEN
+// ============================================================
+function DealScreen({
+  symbol, ct, formatPrice, onBack,
 }: {
-  icon: React.ReactNode
-  label: string
-  active: boolean
-  onClick: () => void
-  badge?: number
+  symbol: OALightSymbol
+  ct: ReturnType<typeof useCTrader>
+  formatPrice: (price: number | undefined, symbolId: number) => string
+  onBack: () => void
+}) {
+  const [side, setSide] = useState<"BUY" | "SELL">("SELL")
+  const [volume, setVolume] = useState(10000)
+  const [submitting, setSubmitting] = useState(false)
+  const [popup, setPopup] = useState<{ type: "success" | "error"; title: string; message: string; details?: Record<string, string> } | null>(null)
+  const [slEnabled, setSlEnabled] = useState(false)
+  const [tpEnabled, setTpEnabled] = useState(false)
+  const [trailingEnabled, setTrailingEnabled] = useState(false)
+
+  const quote = ct.quotes.get(symbol.symbolId)
+  const details = ct.symbolDetails.get(symbol.symbolId)
+  const digits = details?.digits ?? 5
+  const minVol = details?.minVolume ? details.minVolume / 100 : 1000
+  const maxVol = details?.maxVolume ? details.maxVolume / 100 : 10000000
+  const stepVol = details?.stepVolume ? details.stepVolume / 100 : 1000
+
+  const bidPrice = formatPrice(quote?.bid, symbol.symbolId)
+  const askPrice = formatPrice(quote?.ask, symbol.symbolId)
+
+  // Calculate spread
+  const bid = quote?.bid ? quote.bid / 100000 : 0
+  const ask = quote?.ask ? quote.ask / 100000 : 0
+  const spread = bid && ask ? (ask - bid).toFixed(digits) : "0"
+
+  const handleSubmit = async () => {
+    setSubmitting(true)
+    try {
+      const lotSize = details?.lotSize ?? 100000
+      const volumeInCents = volume * 100
+
+      const res = await ct.placeOrder({
+        symbolId: symbol.symbolId,
+        tradeSide: side === "BUY" ? TRADE_SIDE.BUY : TRADE_SIDE.SELL,
+        volume: volumeInCents,
+        orderType: ORDER_TYPE.MARKET,
+      })
+
+      console.log("[cTrader] Order response:", res)
+
+      if (res.payloadType === 2132 || res.payloadType === 2142) {
+        // Error
+        const desc = (res.description as string) || (res.errorCode as string) || "Unknown error"
+        setPopup({
+          type: "error",
+          title: "An error occurred",
+          message: `Error description: ${desc}`,
+        })
+      } else {
+        // Success (execution event or other)
+        const execType = (res.executionType as string) || "ORDER_ACCEPTED"
+        const orderId = res.order ? (res.order as OAOrder).orderId : ""
+        const posId = res.position ? (res.position as OAPosition).positionId : ""
+
+        setPopup({
+          type: "success",
+          title: execType.includes("FILL") ? "Position opened" : "Pending order was created",
+          message: `${side} ${symbol.symbolName} order was ${execType.includes("FILL") ? "filled" : "created"}.`,
+          details: {
+            Amount: `${volume.toLocaleString()} ${ct.depositAssetName}`,
+            Price: side === "BUY" ? askPrice : bidPrice,
+            ...(orderId ? { "Order ID": String(orderId) } : {}),
+            ...(posId ? { "Position ID": String(posId) } : {}),
+          },
+        })
+      }
+    } catch (err) {
+      setPopup({
+        type: "error",
+        title: "An error occurred",
+        message: err instanceof Error ? err.message : "Order failed",
+      })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="h-12 flex items-center px-4 border-b border-[var(--border)] shrink-0">
+        <button onClick={onBack} className="flex items-center gap-1 text-[var(--primary)] text-sm">
+          <ChevronLeftIcon className="size-4" />
+          Back
+        </button>
+        <span className="flex-1 text-center font-medium text-sm text-white">
+          {side} {symbol.symbolName}
+        </span>
+        <div className="w-12" />
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        {/* Symbol info */}
+        <div className="px-4 py-3 flex items-center gap-3">
+          <div className="w-10 h-10 rounded bg-[var(--accent)] flex items-center justify-center text-xs font-bold text-[var(--muted-foreground)]">
+            {symbol.symbolName.slice(0, 2)}
+          </div>
+          <div className="flex-1">
+            <span className="text-white font-semibold">{symbol.symbolName}</span>
+            <p className="text-[var(--muted-foreground)] text-xs">{symbol.description || "Forex"}</p>
+          </div>
+          <div className="text-right">
+            <span className="text-[var(--color-buy)] text-sm">{spread}</span>
+          </div>
+          <StarIcon className="size-4 text-[var(--muted-foreground)]" />
+        </div>
+
+        {/* Sell / Buy toggle */}
+        <div className="px-4 flex gap-2 mb-4">
+          <button
+            className={`flex-1 py-2.5 rounded border text-center transition-colors ${
+              side === "SELL"
+                ? "bg-[var(--card)] border-[var(--primary)]"
+                : "border-[var(--border)]"
+            }`}
+            onClick={() => setSide("SELL")}
+          >
+            <span className="text-[var(--muted-foreground)] text-xs block">Sell</span>
+            <span className="text-[var(--color-sell)] text-sm font-mono font-semibold">{bidPrice}</span>
+          </button>
+          <button
+            className={`flex-1 py-2.5 rounded border text-center transition-colors ${
+              side === "BUY"
+                ? "bg-[var(--card)] border-[var(--primary)]"
+                : "border-[var(--border)]"
+            }`}
+            onClick={() => setSide("BUY")}
+          >
+            <span className="text-[var(--muted-foreground)] text-xs block">Buy</span>
+            <span className="text-[var(--color-buy)] text-sm font-mono font-semibold">{askPrice}</span>
+          </button>
+          <button className="w-8 flex items-center justify-center text-[var(--muted-foreground)]">
+            <InfoIcon className="size-4" />
+          </button>
+        </div>
+
+        <div className="px-4 space-y-4">
+          {/* Volume */}
+          <div>
+            <span className="text-[var(--muted-foreground)] text-xs block mb-2">Barrels</span>
+            <div className="flex gap-2">
+              <button
+                className="w-12 h-10 rounded bg-[var(--card)] border border-[var(--border)] flex items-center justify-center text-white text-lg"
+                onClick={() => setVolume((v) => Math.max(minVol, v - stepVol))}
+              >
+                −
+              </button>
+              <input
+                type="number"
+                value={volume}
+                onChange={(e) => setVolume(Number(e.target.value) || minVol)}
+                className="flex-1 h-10 text-center rounded bg-[var(--card)] border border-[var(--border)] text-[var(--primary)] font-mono text-sm outline-none"
+              />
+              <button
+                className="w-12 h-10 rounded bg-[var(--card)] border border-[var(--border)] flex items-center justify-center text-white text-lg"
+                onClick={() => setVolume((v) => Math.min(maxVol, v + stepVol))}
+              >
+                +
+              </button>
+            </div>
+          </div>
+
+          <Divider />
+
+          {/* Take Profit */}
+          <ToggleRow label="Take profit" enabled={tpEnabled} onToggle={() => setTpEnabled(!tpEnabled)} />
+
+          <Divider />
+
+          {/* Stop Loss */}
+          <ToggleRow label="Stop loss" enabled={slEnabled} onToggle={() => setSlEnabled(!slEnabled)} />
+
+          <Divider />
+
+          {/* Trailing Stop */}
+          <ToggleRow label="Trailing stop" enabled={trailingEnabled} onToggle={() => setTrailingEnabled(!trailingEnabled)} />
+        </div>
+      </div>
+
+      {/* Submit button */}
+      <div className="p-4 shrink-0">
+        <button
+          onClick={handleSubmit}
+          disabled={submitting}
+          className="w-full py-3.5 rounded-lg bg-[var(--primary)] text-white font-semibold text-sm disabled:opacity-50"
+        >
+          {submitting ? <Spinner className="size-5 mx-auto" /> : side}
+        </button>
+      </div>
+
+      {/* Footer */}
+      <div className="h-10 flex items-center justify-between px-4 border-t border-[var(--border)] shrink-0">
+        <span className="text-[var(--muted-foreground)] text-xs font-medium">Sources and details</span>
+        <div className="flex items-center gap-1.5">
+          <svg viewBox="0 0 20 20" className="w-4 h-4">
+            <circle cx="10" cy="10" r="7" fill="none" stroke="#ff4444" strokeWidth="1.5" />
+            <circle cx="10" cy="10" r="2.5" fill="#ff4444" />
+          </svg>
+          <span className="text-[var(--muted-foreground)] text-xs font-medium">Open API</span>
+        </div>
+      </div>
+
+      {/* POPUP */}
+      {popup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-6">
+          <div className="bg-[var(--card)] rounded-xl w-full max-w-sm p-6 space-y-4">
+            <h3 className="text-white font-bold text-center text-lg">{popup.title}</h3>
+            <p className="text-[var(--muted-foreground)] text-sm text-center">{popup.message}</p>
+            {popup.details && (
+              <>
+                <div className="border-t border-[var(--border)]" />
+                <div className="space-y-2">
+                  {Object.entries(popup.details).map(([k, v]) => (
+                    <div key={k} className="flex justify-between text-sm">
+                      <span className="text-[var(--muted-foreground)]">{k}</span>
+                      <span className="text-white font-semibold">{v}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="border-t border-[var(--border)]" />
+              </>
+            )}
+            <button
+              onClick={() => { setPopup(null); if (popup.type === "success") onBack() }}
+              className="w-48 mx-auto block py-2.5 rounded-lg bg-[var(--primary)] text-white font-medium text-sm"
+            >
+              Ok
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ============================================================
+// ACCOUNT SCREEN
+// ============================================================
+function AccountScreen({
+  trader, depositAssetName, isLive, positions, orders, formatMoney, moneyDigits, userName,
+}: {
+  trader: ReturnType<typeof useCTrader>["trader"]
+  depositAssetName: string
+  isLive: boolean
+  positions: OAPosition[]
+  orders: OAOrder[]
+  formatMoney: (amount: number, digits?: number) => string
+  moneyDigits: number
+  userName: string
+}) {
+  if (!trader) return <p className="text-center text-[var(--muted-foreground)] py-8">Loading...</p>
+
+  return (
+    <div className="p-4 space-y-4">
+      <p className="text-[var(--muted-foreground)] text-sm">Hello, {userName}</p>
+
+      {/* Account selector */}
+      <div className="flex items-center gap-2">
+        <span className="text-[var(--muted-foreground)] text-sm">Account</span>
+        <div className="flex-1 px-3 py-2 rounded bg-[var(--card)] border border-[var(--border)] text-white text-sm">
+          {trader.ctidTraderAccountId} — {isLive ? "Live" : "Demo"}
+        </div>
+      </div>
+
+      <div className="border-t border-[var(--border)]" />
+
+      {/* Metrics */}
+      <div className="space-y-3">
+        <MetricRow label="Balance:" value={`${formatMoney(trader.balance, moneyDigits)}${depositAssetName}`} />
+        <MetricRow label="Leverage:" value={`1:${trader.leverageInCents / 100}`} />
+        <MetricRow label="Open Positions:" value={String(positions.length)} />
+        <MetricRow label="Pending Orders:" value={String(orders.length)} />
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
+// ACTIVITY SCREEN
+// ============================================================
+function ActivityScreen({
+  positions, orders, quotes, symbolDetails, getSymbolName,
+  formatPrice, formatVolume, closePosition, cancelOrder,
+  activityTab, setActivityTab, expandedPosition, setExpandedPosition,
+}: {
+  positions: OAPosition[]
+  orders: OAOrder[]
+  quotes: Map<number, { bid?: number; ask?: number; timestamp: number }>
+  symbolDetails: Map<number, OASymbol>
+  getSymbolName: (id: number) => string
+  formatPrice: (price: number | undefined, symbolId: number) => string
+  formatVolume: (vol: number, symbolId: number) => string
+  closePosition: (positionId: number, volume: number) => Promise<unknown>
+  cancelOrder: (orderId: number) => Promise<unknown>
+  activityTab: string
+  setActivityTab: (t: "positions" | "orders" | "closed") => void
+  expandedPosition: number | null
+  setExpandedPosition: (id: number | null) => void
 }) {
   return (
+    <div>
+      {/* Tabs */}
+      <div className="flex border-b border-[var(--border)]">
+        {(["positions", "orders", "closed"] as const).map((tab) => (
+          <button
+            key={tab}
+            className={`flex-1 py-3 text-sm font-medium capitalize transition-colors ${
+              activityTab === tab
+                ? "text-white border-b-2 border-[var(--primary)]"
+                : "text-[var(--muted-foreground)]"
+            }`}
+            onClick={() => setActivityTab(tab)}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {/* Positions */}
+      {activityTab === "positions" && (
+        <div>
+          {positions.map((pos) => {
+            const isBuy = pos.tradeData.tradeSide === TRADE_SIDE.BUY
+            const quote = quotes.get(pos.tradeData.symbolId)
+            const details = symbolDetails.get(pos.tradeData.symbolId)
+            const currentPrice = isBuy ? quote?.bid : quote?.ask
+            const digits = details?.digits ?? 5
+            const pipPos = details?.pipPosition ?? 4
+            const entry = pos.price / 100000
+            const current = currentPrice ? currentPrice / 100000 : null
+            const pnlPips = current
+              ? isBuy
+                ? (current - entry) * Math.pow(10, pipPos)
+                : (entry - current) * Math.pow(10, pipPos)
+              : null
+            const expanded = expandedPosition === pos.positionId
+
+            return (
+              <div key={pos.positionId} className="border-b border-[var(--border)]">
+                <button
+                  className="w-full px-3 py-3 flex items-center gap-3 text-left"
+                  onClick={() => setExpandedPosition(expanded ? null : pos.positionId)}
+                >
+                  <div className="w-8 h-8 rounded bg-[var(--accent)] flex items-center justify-center text-[10px] font-bold text-[var(--muted-foreground)]">
+                    {getSymbolName(pos.tradeData.symbolId).slice(0, 2)}
+                  </div>
+                  <span className={`text-sm font-medium ${isBuy ? "text-[var(--color-buy)]" : "text-[var(--color-sell)]"}`}>
+                    {isBuy ? "Buy" : "Sell"}
+                  </span>
+                  <span className="text-white text-sm">
+                    {formatVolume(pos.tradeData.volume, pos.tradeData.symbolId)}
+                  </span>
+                  <span className={`ml-auto text-sm font-mono tabular-nums ${
+                    pnlPips !== null && pnlPips >= 0 ? "text-[var(--color-buy)]" : "text-[var(--color-sell)]"
+                  }`}>
+                    {pnlPips !== null ? `${pnlPips >= 0 ? "" : ""}${pnlPips.toFixed(2)}$` : "—"}
+                  </span>
+                  {expanded ? (
+                    <ChevronUpIcon className="size-4 text-[var(--muted-foreground)]" />
+                  ) : (
+                    <ChevronDownIcon className="size-4 text-[var(--muted-foreground)]" />
+                  )}
+                </button>
+
+                {expanded && (
+                  <div className="px-3 pb-3 space-y-2">
+                    <DetailRow label="Position ID" value={String(pos.positionId)} />
+                    <DetailRow label="Amount" value={`${formatVolume(pos.tradeData.volume, pos.tradeData.symbolId)}`} />
+                    <DetailRow label="Open rate" value={entry.toFixed(digits)} />
+                    {current && <DetailRow label="Current rate" value={current.toFixed(digits)} />}
+                    {pos.stopLoss && <DetailRow label="Stop Loss" value={(pos.stopLoss / 100000).toFixed(digits)} />}
+                    {pos.takeProfit && <DetailRow label="Take Profit" value={(pos.takeProfit / 100000).toFixed(digits)} />}
+                    <div className="flex gap-2 pt-2">
+                      <button
+                        onClick={() => closePosition(pos.positionId, pos.tradeData.volume)}
+                        className="flex-1 py-2 rounded bg-[var(--destructive)] text-white text-sm font-medium"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          {positions.length === 0 && (
+            <p className="text-center text-[var(--muted-foreground)] text-sm py-12">No open positions</p>
+          )}
+        </div>
+      )}
+
+      {/* Orders */}
+      {activityTab === "orders" && (
+        <div>
+          {orders.map((ord) => {
+            const isBuy = ord.tradeData.tradeSide === TRADE_SIDE.BUY
+            const details = symbolDetails.get(ord.tradeData.symbolId)
+            const digits = details?.digits ?? 5
+            const price = ord.limitPrice ?? ord.stopPrice ?? 0
+
+            return (
+              <div key={ord.orderId} className="border-b border-[var(--border)] px-3 py-3 flex items-center gap-3">
+                <div className="w-8 h-8 rounded bg-[var(--accent)] flex items-center justify-center text-[10px] font-bold text-[var(--muted-foreground)]">
+                  {getSymbolName(ord.tradeData.symbolId).slice(0, 2)}
+                </div>
+                <span className={`text-sm font-medium ${isBuy ? "text-[var(--color-buy)]" : "text-[var(--color-sell)]"}`}>
+                  {isBuy ? "Buy" : "Sell"}
+                </span>
+                <span className="text-white text-sm">
+                  {formatVolume(ord.tradeData.volume, ord.tradeData.symbolId)}
+                </span>
+                <span className="ml-auto text-[var(--muted-foreground)] text-xs">
+                  {price > 0 ? (price / 100000).toFixed(digits) : "Market"}
+                </span>
+                <button
+                  onClick={() => cancelOrder(ord.orderId)}
+                  className="text-[var(--destructive)]"
+                >
+                  <XIcon className="size-4" />
+                </button>
+              </div>
+            )
+          })}
+          {orders.length === 0 && (
+            <p className="text-center text-[var(--muted-foreground)] text-sm py-12">No pending orders</p>
+          )}
+        </div>
+      )}
+
+      {activityTab === "closed" && (
+        <p className="text-center text-[var(--muted-foreground)] text-sm py-12">No closed positions</p>
+      )}
+    </div>
+  )
+}
+
+// ============================================================
+// HELPER COMPONENTS
+// ============================================================
+function MenuItem({ label, badge, onClick }: { label: string; badge?: number; onClick: () => void }) {
+  return (
     <button
-      className={`flex-1 flex flex-col items-center gap-0.5 py-2 transition-colors relative ${
-        active ? "text-primary" : "text-muted-foreground"
-      }`}
       onClick={onClick}
+      className="w-full flex items-center justify-between px-4 py-3 border-b border-[var(--border)] hover:bg-[var(--accent)] transition-colors"
     >
-      <div className="relative">
-        {icon}
+      <span className="text-white text-sm">{label}</span>
+      <div className="flex items-center gap-2">
         {badge !== undefined && badge > 0 && (
-          <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 rounded-full bg-blue-500 text-white text-[10px] font-bold flex items-center justify-center px-1">
+          <span className="bg-[var(--color-buy)] text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center">
             {badge}
           </span>
         )}
+        <ChevronDownIcon className="size-4 text-[var(--muted-foreground)] -rotate-90" />
       </div>
-      <span className="text-[10px] font-medium">{label}</span>
     </button>
+  )
+}
+
+function TabButton({ label, active }: { label: string; active?: boolean }) {
+  return (
+    <button
+      className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+        active
+          ? "border-[var(--primary)] text-white"
+          : "border-transparent text-[var(--muted-foreground)]"
+      }`}
+    >
+      {label}
+    </button>
+  )
+}
+
+function ToggleRow({ label, enabled, onToggle }: { label: string; enabled: boolean; onToggle: () => void }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-white text-sm">{label}</span>
+      <button
+        onClick={onToggle}
+        className={`w-11 h-6 rounded-full relative transition-colors ${
+          enabled ? "bg-[var(--primary)]" : "bg-[var(--accent)]"
+        }`}
+      >
+        <div
+          className={`w-5 h-5 rounded-full bg-white absolute top-0.5 transition-transform ${
+            enabled ? "translate-x-5.5" : "translate-x-0.5"
+          }`}
+        />
+      </button>
+    </div>
+  )
+}
+
+function Divider() {
+  return <div className="border-t border-[var(--border)]" />
+}
+
+function MetricRow({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-[var(--muted-foreground)] text-sm">{label}</span>
+      <span className={`text-sm font-mono ${valueColor || "text-white"}`}>{value}</span>
+    </div>
+  )
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between text-xs">
+      <span className="text-[var(--muted-foreground)]">{label}</span>
+      <span className="text-white">{value}</span>
+    </div>
   )
 }
