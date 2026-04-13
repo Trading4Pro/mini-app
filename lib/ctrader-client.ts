@@ -265,4 +265,18 @@ export class CTraderClient {
       ctidTraderAccountId,
     })
   }
+
+  async getTrendbars(params: {
+    ctidTraderAccountId: number
+    symbolId: number
+    period: number // enum: 1=M1, 2=M2, 3=M5, 4=M10, 5=M15, 6=M30, 7=H1, 8=H4, 9=H12, 10=D1, 11=W1, 12=MN1
+    fromTimestamp: number // ms
+    toTimestamp: number // ms
+    count?: number
+  }): Promise<CTraderMessage> {
+    return this.sendRequest({
+      payloadType: PayloadType.OA_GET_TRENDBARS_REQ,
+      ...params,
+    }, 30000) // longer timeout for historical data
+  }
 }

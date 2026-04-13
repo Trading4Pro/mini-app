@@ -319,6 +319,23 @@ export function useCTrader() {
     }
   }, [])
 
+  const getTrendbars = useCallback(async (
+    symbolId: number,
+    period: number,
+    fromTimestamp: number,
+    toTimestamp: number,
+  ) => {
+    const client = clientRef.current
+    if (!client || !selectedAccountId) throw new Error("Not connected")
+    return client.getTrendbars({
+      ctidTraderAccountId: selectedAccountId,
+      symbolId,
+      period,
+      fromTimestamp,
+      toTimestamp,
+    })
+  }, [selectedAccountId])
+
   return {
     status,
     error,
@@ -342,5 +359,6 @@ export function useCTrader() {
     closePosition,
     cancelOrder,
     getSymbolName,
+    getTrendbars,
   }
 }

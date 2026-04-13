@@ -6,6 +6,7 @@ import { useCTrader } from "@/hooks/use-ctrader"
 import { TRADE_SIDE, ORDER_TYPE } from "@/types/ctrader"
 import type { OALightSymbol, OASymbol, OAPosition, OAOrder } from "@/types/ctrader"
 import { Spinner } from "@/components/ui/spinner"
+import { TradingChart } from "@/components/trading/chart"
 import {
   MenuIcon,
   XIcon,
@@ -30,6 +31,7 @@ export default function TradingApp() {
   const [symbolSearch, setSymbolSearch] = useState("")
   const [activityTab, setActivityTab] = useState<"positions" | "orders" | "closed">("positions")
   const [expandedPosition, setExpandedPosition] = useState<number | null>(null)
+  const [chartSymbolId, setChartSymbolId] = useState<number | null>(null)
 
   // Telegram init
   useEffect(() => {
@@ -305,6 +307,9 @@ export default function TradingApp() {
                   formatVolume={formatVolume}
                   getSymbolName={ct.getSymbolName}
                   onOpenDeal={openDeal}
+                  chartSymbolId={chartSymbolId}
+                  setChartSymbolId={setChartSymbolId}
+                  getTrendbars={ct.getTrendbars}
                 />
               )}
               {screen === "account" && (
@@ -362,6 +367,7 @@ export default function TradingApp() {
 function MarketsScreen({
   symbols, quotes, positions, symbolDetails, symbolSearch, setSymbolSearch,
   formatPrice, formatVolume, getSymbolName, onOpenDeal,
+  chartSymbolId, setChartSymbolId, getTrendbars,
 }: {
   symbols: OALightSymbol[]
   quotes: Map<number, { bid?: number; ask?: number; timestamp: number }>
@@ -373,7 +379,14 @@ function MarketsScreen({
   formatVolume: (vol: number, symbolId: number) => string
   getSymbolName: (id: number) => string
   onOpenDeal: (symbol: OALightSymbol) => void
+  chartSymbolId: number | null
+  setChartSymbolId: (id: number | null) => void
+  getTrendbars: (symbolId: number, period: number, from: number, to: number) => Promise<any>
 }) {
+  // Default chart to first symbol
+  const activeChartId = chartSymbolId || (symbols.length > 0 ? symbols[0].symbolId : null)
+  const activeChartSymbol = symbols.find((s) => s.symbolId === activeChartId)
+  const activeChartDetails = activeChartId ? symbolDetails.get(activeChartId) : null
   return (
     <div className="flex flex-col">
       {/* Search */}
@@ -499,6 +512,17 @@ function MarketsScreen({
           <p className="text-center text-[var(--muted-foreground)] text-sm py-12">Loading symbols...</p>
         )}
       </div>
+
+      {/* Chart at bottom */}
+      {activeChartSymbol && activeChartId && (
+        <TradingChart
+          symbolId={activeChartId}
+          symbolName={activeChartSymbol.symbolName}
+          digits={activeChartDetails?.digits ?? 5}
+          getTrendbars={getTrendbars}
+          height={200}
+        />
+      )}
     </div>
   )
 }

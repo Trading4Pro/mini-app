@@ -22,4 +22,6 @@ interface Window {
   Telegram?: {
     WebApp: TelegramWebApp
   }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  T4PChart?: any
 }
