@@ -181,8 +181,44 @@ export function TradingChart({ symbolId, symbolName, digits, getTrendbars, heigh
     { label: "1D", value: TrendbarPeriod.D1 },
   ]
 
+  // Resizable chart height
+  const [chartHeight, setChartHeight] = useState(height)
+  const draggingRef = useRef(false)
+  const startYRef = useRef(0)
+  const startHeightRef = useRef(height)
+
+  const onDragStart = useCallback((e: React.PointerEvent) => {
+    e.preventDefault()
+    draggingRef.current = true
+    startYRef.current = e.clientY
+    startHeightRef.current = chartHeight
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+  }, [chartHeight])
+
+  const onDragMove = useCallback((e: React.PointerEvent) => {
+    if (!draggingRef.current) return
+    const delta = startYRef.current - e.clientY // dragging up = bigger
+    const newH = Math.max(height, Math.min(height * 2, startHeightRef.current + delta))
+    setChartHeight(newH)
+  }, [height])
+
+  const onDragEnd = useCallback(() => {
+    draggingRef.current = false
+  }, [])
+
   return (
     <div className="border-t border-[var(--border)] shrink-0">
+      {/* Drag handle to resize */}
+      <div
+        className="h-3 flex items-center justify-center cursor-ns-resize bg-[var(--card)] hover:bg-[var(--accent)] transition-colors"
+        onPointerDown={onDragStart}
+        onPointerMove={onDragMove}
+        onPointerUp={onDragEnd}
+        onPointerCancel={onDragEnd}
+      >
+        <div className="w-8 h-1 rounded-full bg-[var(--muted-foreground)]/40" />
+      </div>
+
       <div className="flex gap-0.5 px-2 py-1.5 bg-[var(--card)]">
         {periods.map((p) => (
           <button
@@ -197,14 +233,14 @@ export function TradingChart({ symbolId, symbolName, digits, getTrendbars, heigh
         ))}
         <span className="ml-auto text-[var(--muted-foreground)] text-xs self-center">{symbolName}</span>
       </div>
-      <div className="relative bg-[var(--background)]" style={{ height }}>
+      <div className="relative chart-dark-container" style={{ height: chartHeight, background: "#0d1421" }}>
         {error && !loading && (
-          <div className="absolute inset-0 flex items-center justify-center z-10">
+          <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: "#0d1421" }}>
             <p className="text-[var(--muted-foreground)] text-xs">{error}</p>
           </div>
         )}
         {(loading || !libLoaded) && (
-          <div className="absolute inset-0 flex items-center justify-center z-10">
+          <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: "#0d1421" }}>
             <Spinner className="size-6 text-[var(--primary)]" />
           </div>
         )}

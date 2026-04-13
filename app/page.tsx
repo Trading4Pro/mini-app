@@ -16,6 +16,7 @@ import {
   StarIcon,
   SearchIcon,
   InfoIcon,
+  PencilIcon,
 } from "lucide-react"
 
 // ============================================================
@@ -307,6 +308,7 @@ export default function TradingApp() {
                   formatVolume={formatVolume}
                   getSymbolName={ct.getSymbolName}
                   onOpenDeal={openDeal}
+                  closePosition={ct.closePosition}
                   chartSymbolId={chartSymbolId}
                   setChartSymbolId={setChartSymbolId}
                   getTrendbars={ct.getTrendbars}
@@ -383,7 +385,7 @@ function classifySymbol(name: string): string {
 
 function MarketsScreen({
   symbols, quotes, positions, symbolDetails, symbolSearch, setSymbolSearch,
-  formatPrice, formatVolume, getSymbolName, onOpenDeal,
+  formatPrice, formatVolume, getSymbolName, onOpenDeal, closePosition,
   chartSymbolId, setChartSymbolId, getTrendbars,
 }: {
   symbols: OALightSymbol[]
@@ -396,6 +398,7 @@ function MarketsScreen({
   formatVolume: (vol: number, symbolId: number) => string
   getSymbolName: (id: number) => string
   onOpenDeal: (symbol: OALightSymbol) => void
+  closePosition: (positionId: number, volume: number) => Promise<unknown>
   chartSymbolId: number | null
   setChartSymbolId: (id: number | null) => void
   getTrendbars: (symbolId: number, period: number, from: number, to: number) => Promise<any>
@@ -442,14 +445,14 @@ function MarketsScreen({
       </div>
 
       {/* Category tabs - fixed */}
-      <div className="flex gap-0 px-3 border-b border-[var(--border)] shrink-0 overflow-x-auto">
+      <div className="flex gap-0 px-3 border-b border-[var(--border)] shrink-0 overflow-x-auto hide-scrollbar">
         {categories.map((cat) => (
           <TabButton key={cat} label={cat} active={activeCategory === cat} onClick={() => setActiveCategory(cat)} />
         ))}
       </div>
 
       {/* Symbol list - scrollable */}
-      <div className="flex-1 overflow-y-auto min-h-0">
+      <div className="flex-1 overflow-y-auto min-h-0 thin-scrollbar">
         {visibleSymbols.map((symbol) => {
           const quote = quotes.get(symbol.symbolId)
           const details = symbolDetails.get(symbol.symbolId)
@@ -496,15 +499,35 @@ function MarketsScreen({
                   const entry = pos.price / 100000
                   const current = currentPrice ? currentPrice / 100000 : null
                   const pnlPips = current ? (isBuy ? (current - entry) : (entry - current)) * Math.pow(10, pipPos) : null
+                  // Rough $ PnL estimate (pips * volume * pipValue)
+                  const pnlValue = pnlPips !== null ? pnlPips * (pos.tradeData.volume / 100) * 0.0001 : null
                   return (
-                    <div key={pos.positionId} className="flex items-center gap-2 mt-1.5 pl-2 text-xs">
-                      <span className="text-[var(--muted-foreground)]">{isBuy ? "Buy" : "Sell"}</span>
-                      <span className="text-[var(--muted-foreground)]">{formatVolume(pos.tradeData.volume, pos.tradeData.symbolId)}</span>
+                    <div key={pos.positionId} className="flex items-center gap-2 mt-2 py-1.5 border-t border-[var(--border)]/50">
+                      <span className={`text-xs font-medium ${isBuy ? "text-[var(--color-buy)]" : "text-[var(--color-sell)]"}`}>
+                        {isBuy ? "Buy" : "Sell"}
+                      </span>
+                      <span className="text-white text-xs">
+                        {formatVolume(pos.tradeData.volume, pos.tradeData.symbolId)}
+                      </span>
                       {pnlPips !== null && (
-                        <span className={`ml-auto font-mono ${pnlPips >= 0 ? "text-[var(--color-buy)]" : "text-[var(--color-sell)]"}`}>
-                          {pnlPips.toFixed(2)}
+                        <span className={`ml-auto font-mono text-xs font-semibold ${pnlPips >= 0 ? "text-[var(--color-buy)]" : "text-[var(--color-sell)]"}`}>
+                          {pnlPips >= 0 ? "+" : ""}{pnlPips.toFixed(2)}$
                         </span>
                       )}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onOpenDeal(symbol) }}
+                        className="p-1 text-[var(--muted-foreground)] hover:text-[var(--primary)]"
+                        title="Edit"
+                      >
+                        <PencilIcon className="size-3" />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); closePosition(pos.positionId, pos.tradeData.volume) }}
+                        className="p-1 text-[var(--muted-foreground)] hover:text-[var(--destructive)]"
+                        title="Close"
+                      >
+                        <XIcon className="size-3" />
+                      </button>
                     </div>
                   )
                 })}

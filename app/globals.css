@@ -128,3 +128,44 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Force chart dark theme */
+.chart-dark-container canvas {
+  border-radius: 0 !important;
+}
+.chart-dark-container {
+  background: #0d1421 !important;
+  color-scheme: dark;
+}
+.chart-dark-container * {
+  color-scheme: dark;
+}
+
+/* Hide ugly scrollbars - only show on hover/scroll */
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(107, 125, 148, 0.2) transparent;
+}
+.thin-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(107, 125, 148, 0);
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+.thin-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgba(107, 125, 148, 0.3);
+}
+
+/* Hide horizontal scrollbar on category tabs */
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
