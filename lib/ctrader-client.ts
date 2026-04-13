@@ -75,9 +75,13 @@ export class CTraderClient {
     }
   }
 
-  private handleMessage(msg: CTraderMessage) {
+  private handleMessage(raw: CTraderMessage) {
     // Handle heartbeat silently
-    if (msg.payloadType === PayloadType.HEARTBEAT) return
+    if (raw.payloadType === PayloadType.HEARTBEAT) return
+
+    // Flatten: merge payload fields into top level for easier access
+    const payload = (raw.payload as Record<string, unknown>) || {}
+    const msg: CTraderMessage = { payloadType: raw.payloadType, clientMsgId: raw.clientMsgId, ...payload }
 
     // Resolve pending request if clientMsgId matches
     if (msg.clientMsgId && this.pendingRequests.has(msg.clientMsgId)) {
@@ -97,7 +101,6 @@ export class CTraderClient {
   sendRequest(msg: Omit<CTraderMessage, "clientMsgId">, timeoutMs = 10000): Promise<CTraderMessage> {
     return new Promise((resolve, reject) => {
       const clientMsgId = String(++this.msgId)
-      const fullMsg = { ...msg, clientMsgId }
 
       const timer = setTimeout(() => {
         this.pendingRequests.delete(clientMsgId)
@@ -115,7 +118,9 @@ export class CTraderClient {
         },
       })
 
-      this.send(fullMsg)
+      // JSON protocol: wrap fields in payload object
+      const { payloadType, ...fields } = msg
+      this.send({ payloadType, clientMsgId, payload: fields } as CTraderMessage)
     })
   }
 
@@ -123,6 +128,7 @@ export class CTraderClient {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error("WebSocket not connected")
     }
+    console.log("[cTrader] >>", msg.payloadType, msg)
     this.ws.send(JSON.stringify(msg))
   }
 
