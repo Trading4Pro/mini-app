@@ -187,6 +187,19 @@ export default function TradingApp() {
           <div className="h-12 flex items-center justify-center border-b border-[var(--border)]">
             <span className="text-white font-medium">Select Account</span>
           </div>
+          {ct.error && (
+            <div className="px-3 py-2 bg-[var(--destructive)]/10 text-[var(--destructive)] text-xs text-center">
+              {ct.error}
+            </div>
+          )}
+          {(ct.status === "connecting" || ct.status === "authenticating") && (
+            <div className="px-3 py-3 flex items-center justify-center gap-2">
+              <Spinner className="size-4 text-[var(--primary)]" />
+              <span className="text-[var(--muted-foreground)] text-sm">
+                {ct.status === "connecting" ? "Connecting..." : "Authenticating..."}
+              </span>
+            </div>
+          )}
           <div className="flex-1 p-3 space-y-2">
             {ct.accounts.map((acc) => (
               <button

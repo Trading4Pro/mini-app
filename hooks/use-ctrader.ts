@@ -161,14 +161,27 @@ export function useCTrader() {
     if (account) {
       const needsLive = account.isLive
       if (needsLive !== isLive) {
-        // Reconnect to the correct server
-        client.disconnect()
-        clientRef.current = null
-        setIsLive(needsLive)
-        const newClient = new CTraderClient()
-        clientRef.current = newClient
-        await newClient.connect(needsLive)
-        await newClient.authenticateApp()
+        // Need to reconnect to the correct server (demo↔live)
+        try {
+          setStatus("connecting")
+          setError(null)
+          client.disconnect()
+          clientRef.current = null
+          setIsLive(needsLive)
+          const newClient = new CTraderClient()
+          clientRef.current = newClient
+          await newClient.connect(needsLive)
+          setStatus("authenticating")
+          const appAuth = await newClient.authenticateApp()
+          if (appAuth.payloadType !== PayloadType.OA_APPLICATION_AUTH_RES) {
+            throw new Error("App auth failed on " + (needsLive ? "live" : "demo") + " server")
+          }
+          setStatus("connected")
+        } catch (err) {
+          setStatus("error")
+          setError(err instanceof Error ? err.message : "Failed to connect to " + (needsLive ? "live" : "demo"))
+          return
+        }
       }
     }
 
