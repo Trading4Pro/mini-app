@@ -51,12 +51,25 @@ export function TradingChart({ symbolId, symbolName, digits, getTrendbars, heigh
   const [period, setPeriod] = useState(TrendbarPeriod.M5)
   const [libLoaded, setLibLoaded] = useState(false)
 
-  // Wait for T4PChart to be available
+  // Dynamically load chart-api.min.js and wait for T4PChart
   useEffect(() => {
     if (window.T4PChart) { setLibLoaded(true); return }
+
+    // Check if script already exists
+    if (!document.querySelector('script[src="/chart-api.min.js"]')) {
+      const script = document.createElement("script")
+      script.src = "/chart-api.min.js"
+      script.async = true
+      script.onload = () => {
+        if (window.T4PChart) setLibLoaded(true)
+      }
+      document.body.appendChild(script)
+    }
+
+    // Poll as fallback
     const interval = setInterval(() => {
       if (window.T4PChart) { setLibLoaded(true); clearInterval(interval) }
-    }, 200)
+    }, 500)
     return () => clearInterval(interval)
   }, [])
 

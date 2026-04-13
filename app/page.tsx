@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useState, useMemo, useCallback } from "react"
-import Script from "next/script"
 import { useCTrader } from "@/hooks/use-ctrader"
 import { TRADE_SIDE, ORDER_TYPE } from "@/types/ctrader"
 import type { OALightSymbol, OASymbol, OAPosition, OAOrder } from "@/types/ctrader"
@@ -84,9 +83,7 @@ export default function TradingApp() {
   // ---- LOGIN ----
   if (!ct.accessToken) {
     return (
-      <>
-        <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
-        <main className="min-h-screen flex flex-col items-center justify-center px-6 bg-[var(--background)]">
+      <main className="min-h-screen flex flex-col items-center justify-center px-6 bg-[var(--background)]">
           <div className="text-center space-y-6 max-w-sm w-full">
             {/* Logo */}
             <div className="space-y-1">
@@ -133,31 +130,25 @@ export default function TradingApp() {
             </button>
           </div>
         </main>
-      </>
     )
   }
 
   // ---- CONNECTING ----
   if (ct.status === "connecting" || ct.status === "authenticating") {
     return (
-      <>
-        <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
-        <main className="min-h-screen flex flex-col items-center justify-center bg-[var(--background)]">
+      <main className="min-h-screen flex flex-col items-center justify-center bg-[var(--background)]">
           <Spinner className="h-8 w-8 text-[var(--primary)]" />
           <p className="text-[var(--muted-foreground)] mt-3 text-sm">
             {ct.status === "connecting" ? "Connecting..." : "Authenticating..."}
           </p>
         </main>
-      </>
     )
   }
 
   // ---- ERROR ----
   if (ct.status === "error") {
     return (
-      <>
-        <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
-        <main className="min-h-screen flex flex-col items-center justify-center px-6 bg-[var(--background)]">
+      <main className="min-h-screen flex flex-col items-center justify-center px-6 bg-[var(--background)]">
           <div className="text-center space-y-4 max-w-sm">
             <p className="text-[var(--destructive)] font-medium">Connection failed</p>
             <p className="text-[var(--muted-foreground)] text-sm break-words">{ct.error}</p>
@@ -174,16 +165,13 @@ export default function TradingApp() {
             </div>
           </div>
         </main>
-      </>
     )
   }
 
   // ---- ACCOUNT SELECTION ----
   if (!ct.selectedAccountId && ct.accounts.length > 0) {
     return (
-      <>
-        <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
-        <main className="min-h-screen flex flex-col bg-[var(--background)]">
+      <main className="min-h-screen flex flex-col bg-[var(--background)]">
           <div className="h-12 flex items-center justify-center border-b border-[var(--border)]">
             <span className="text-white font-medium">Select Account</span>
           </div>
@@ -229,7 +217,6 @@ export default function TradingApp() {
             </button>
           </div>
         </main>
-      </>
     )
   }
 
@@ -239,9 +226,7 @@ export default function TradingApp() {
   const moneyDigits = ct.trader?.moneyDigits ?? 2
 
   return (
-    <>
-      <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
-      <main className="h-dvh flex flex-col bg-[var(--background)] text-white overflow-hidden">
+      <main className="h-screen flex flex-col bg-[var(--background)] text-white overflow-hidden" style={{ height: "100vh" }}>
         {/* ---- MENU OVERLAY ---- */}
         {menuOpen && (
           <div className="fixed inset-0 z-50 flex">
@@ -372,7 +357,6 @@ export default function TradingApp() {
           </>
         )}
       </main>
-    </>
   )
 }
 

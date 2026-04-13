@@ -37,7 +37,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="font-sans antialiased">
-        <script src="/chart-api.min.js" defer></script>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
