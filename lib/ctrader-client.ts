@@ -45,9 +45,10 @@ export class CTraderClient {
       this.ws.onmessage = (event) => {
         try {
           const msg: CTraderMessage = JSON.parse(event.data as string)
+          console.log("[cTrader] <<", msg.payloadType, msg)
           this.handleMessage(msg)
         } catch (e) {
-          console.error("Failed to parse message:", e)
+          console.error("Failed to parse message:", e, event.data)
         }
       }
     })

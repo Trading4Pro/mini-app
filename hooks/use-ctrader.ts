@@ -91,8 +91,10 @@ export function useCTrader() {
       setStatus("authenticating")
       // Authenticate app
       const appAuthRes = await client.authenticateApp()
+      console.log("[cTrader] App auth response:", appAuthRes)
       if (appAuthRes.payloadType !== PayloadType.OA_APPLICATION_AUTH_RES) {
-        throw new Error("App authentication failed")
+        const errMsg = (appAuthRes.errorCode as string) || (appAuthRes.description as string) || JSON.stringify(appAuthRes)
+        throw new Error(`App auth failed: ${errMsg}`)
       }
 
       // Get accounts
