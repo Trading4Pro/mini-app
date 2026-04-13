@@ -41,15 +41,6 @@ const periodToMs: Record<number, number> = {
   [TrendbarPeriod.D1]: 24 * 60 * 60_000,
 }
 
-interface Trendbar {
-  timestamp: number
-  open: number
-  high: number
-  low: number
-  close: number
-  volume: number
-}
-
 interface TradingChartProps {
   symbolId: number
   symbolName: string
@@ -59,7 +50,7 @@ interface TradingChartProps {
     period: number,
     fromTimestamp: number,
     toTimestamp: number,
-  ) => Promise<{ trendbar?: Trendbar[]; [key: string]: unknown }>
+  ) => Promise<{ trendbar?: unknown[]; [key: string]: unknown }>
   height?: number
 }
 
@@ -70,31 +61,36 @@ export function TradingChart({
   getTrendbars,
   height = 200,
 }: TradingChartProps) {
-  const chartRef = useRef<ReturnType<typeof window.T4PChart> | null>(null)
+  const chartRef = useRef<any>(null)
+  const containerNodeRef = useRef<HTMLDivElement | null>(null)
   const [chartReady, setChartReady] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [period, setPeriod] = useState(TrendbarPeriod.M5)
-  const loadedRef = useRef(false)
-  const currentSymbolRef = useRef("")
+  const [libLoaded, setLibLoaded] = useState(false)
 
-  // Initialize chart on mount
-  const containerRef = useCallback((node: HTMLDivElement | null) => {
-    if (!node) {
-      chartRef.current = null
-      loadedRef.current = false
-      setChartReady(false)
+  // Wait for T4PChart to be available on window
+  useEffect(() => {
+    if (window.T4PChart) {
+      setLibLoaded(true)
       return
     }
-    if (chartRef.current) return
+    // Poll for it (script might still be loading)
+    const interval = setInterval(() => {
+      if (window.T4PChart) {
+        setLibLoaded(true)
+        clearInterval(interval)
+      }
+    }, 200)
+    return () => clearInterval(interval)
+  }, [])
 
-    if (!window.T4PChart) {
-      setError("Chart library not loaded")
-      return
-    }
+  // Initialize chart once library is loaded and container is mounted
+  useEffect(() => {
+    if (!libLoaded || !containerNodeRef.current || chartRef.current) return
 
     try {
-      const inst = new window.T4PChart(node, {
+      const inst = new window.T4PChart(containerNodeRef.current, {
         general: {
           defaultChartType: "candles",
           saveLayout: false,
@@ -105,16 +101,14 @@ export function TradingChart({
 
       chartRef.current = inst
       if (typeof inst.addEventHandler === "function") {
-        inst.addEventHandler("onChartReady", () => {
-          setChartReady(true)
-        })
+        inst.addEventHandler("onChartReady", () => setChartReady(true))
       } else {
         setChartReady(true)
       }
     } catch (err) {
-      setError("Failed to initialize chart: " + (err instanceof Error ? err.message : String(err)))
+      setError("Failed to init chart: " + (err instanceof Error ? err.message : String(err)))
     }
-  }, [])
+  }, [libLoaded])
 
   // Load data when symbol, period, or chart readiness changes
   useEffect(() => {
@@ -123,10 +117,10 @@ export function TradingChart({
     const chart = chartRef.current
     const libTimeframe = periodToLibTimeframe[period] || "5M"
     const barMs = periodToMs[period] || 5 * 60_000
-
-    // Calculate time range: load ~500 bars
     const toMs = Date.now()
     const fromMs = toMs - 500 * barMs
+
+    let cancelled = false
 
     const loadData = async () => {
       setLoading(true)
@@ -135,51 +129,45 @@ export function TradingChart({
       try {
         if (typeof chart.showLoader === "function") chart.showLoader()
 
-        // Set symbol & timeframe BEFORE pushing data (setSymbol clears chart)
+        // Set symbol & timeframe BEFORE pushing data
         if (typeof chart.setSymbol === "function") chart.setSymbol(symbolName)
         if (typeof chart.setDisplayName === "function") chart.setDisplayName(symbolName)
         if (typeof chart.setTimeframe === "function") chart.setTimeframe(libTimeframe)
         if (typeof chart.clearDrawings === "function") chart.clearDrawings()
 
         const res = await getTrendbars(symbolId, period, fromMs, toMs)
-        const bars = (res.trendbar as Trendbar[]) || []
+        if (cancelled) return
+
+        const bars = (res.trendbar as Array<{
+          timestamp: number; open: number; high: number; low: number; close: number; volume?: number
+        }>) || []
 
         if (bars.length === 0) {
-          setError("No data available")
+          setError("No chart data")
           return
         }
 
         // Set precision
-        if (typeof chart.setDecimals === "function") {
-          chart.setDecimals(symbolName, digits)
-        }
+        if (typeof chart.setDecimals === "function") chart.setDecimals(symbolName, digits)
 
-        // Initialize data store
+        // Init data store
         if (chart.data && typeof chart.data.setSymbols === "function") {
           chart.data.setSymbols([symbolName])
         }
-
-        // Set trading schedule (full week)
         if (chart.data && typeof chart.data.setSchedule === "function") {
           chart.data.setSchedule(symbolName, [{ start: 0, end: 10080 }], 0)
         }
 
-        // Initialize data slot BEFORE setCandles (prevents crash)
+        // Init data slot BEFORE setCandles (critical for avoiding crash)
         if (chart.data && typeof chart.data.empty === "function") {
-          try {
-            chart.data.empty(symbolName, libTimeframe)
-          } catch {
-            /* ignore */
-          }
+          try { chart.data.empty(symbolName, libTimeframe) } catch { /* ignore */ }
         }
 
         // Convert and push candles
-        // cTrader returns prices as integers (multiply by pipette)
-        // Trendbar: open/high/low/close are relative prices in 1/100000
         const candles = bars.map((b) => ({
           symbol: symbolName,
           timeframe: libTimeframe,
-          timestamp: Math.floor(b.timestamp / 1000), // CRITICAL: convert ms to seconds
+          timestamp: Math.floor(b.timestamp / 1000), // ms → seconds
           open: b.open / 100000,
           high: b.high / 100000,
           low: b.low / 100000,
@@ -191,19 +179,29 @@ export function TradingChart({
         if (chart.data && typeof chart.data.setCandles === "function") {
           chart.data.setCandles(candles)
         }
-
-        currentSymbolRef.current = symbolName
       } catch (err) {
-        console.error("[Chart] Load error:", err)
-        setError(err instanceof Error ? err.message : "Failed to load chart data")
+        if (!cancelled) {
+          console.error("[Chart] Load error:", err)
+          setError(err instanceof Error ? err.message : "Chart load failed")
+        }
       } finally {
-        if (typeof chart?.hideLoader === "function") chart.hideLoader()
-        setLoading(false)
+        if (!cancelled) {
+          if (typeof chart?.hideLoader === "function") chart.hideLoader()
+          setLoading(false)
+        }
       }
     }
 
     loadData()
+    return () => { cancelled = true }
   }, [chartReady, symbolId, symbolName, digits, period, getTrendbars])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      chartRef.current = null
+    }
+  }, [])
 
   const periods = [
     { label: "1M", value: TrendbarPeriod.M1 },
@@ -215,7 +213,7 @@ export function TradingChart({
   ]
 
   return (
-    <div className="border-t border-[var(--border)]">
+    <div className="border-t border-[var(--border)] shrink-0">
       {/* Period selector */}
       <div className="flex gap-0.5 px-2 py-1.5 bg-[var(--card)]">
         {periods.map((p) => (
@@ -236,20 +234,20 @@ export function TradingChart({
         </span>
       </div>
 
-      {/* Chart container */}
-      <div className="relative" style={{ height }}>
-        {error && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[var(--background)]/80 z-10">
+      {/* Chart container - fixed height */}
+      <div className="relative bg-[var(--background)]" style={{ height }}>
+        {error && !loading && (
+          <div className="absolute inset-0 flex items-center justify-center z-10">
             <p className="text-[var(--muted-foreground)] text-xs">{error}</p>
           </div>
         )}
-        {loading && !chartReady && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[var(--background)] z-10">
+        {(loading || !libLoaded) && (
+          <div className="absolute inset-0 flex items-center justify-center z-10">
             <Spinner className="size-6 text-[var(--primary)]" />
           </div>
         )}
         <div
-          ref={containerRef as React.RefCallback<HTMLDivElement>}
+          ref={containerNodeRef}
           style={{ width: "100%", height: "100%" }}
         />
       </div>

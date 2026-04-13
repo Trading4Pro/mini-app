@@ -539,7 +539,6 @@ function DealScreen({
   onBack: () => void
 }) {
   const [side, setSide] = useState<"BUY" | "SELL">("SELL")
-  const [volume, setVolume] = useState(10000)
   const [submitting, setSubmitting] = useState(false)
   const [popup, setPopup] = useState<{ type: "success" | "error"; title: string; message: string; details?: Record<string, string> } | null>(null)
   const [slEnabled, setSlEnabled] = useState(false)
@@ -549,9 +548,27 @@ function DealScreen({
   const quote = ct.quotes.get(symbol.symbolId)
   const details = ct.symbolDetails.get(symbol.symbolId)
   const digits = details?.digits ?? 5
+
+  // Volume params from symbol details (values come in cents from API, divide by 100)
   const minVol = details?.minVolume ? details.minVolume / 100 : 1000
   const maxVol = details?.maxVolume ? details.maxVolume / 100 : 10000000
   const stepVol = details?.stepVolume ? details.stepVolume / 100 : 1000
+
+  // Load last traded volume from localStorage, default to minVolume
+  const [volume, setVolume] = useState(() => {
+    if (typeof window === "undefined") return minVol
+    const saved = localStorage.getItem(`lastVol_${symbol.symbolId}`)
+    if (saved) {
+      const v = Number(saved)
+      if (v >= minVol && v <= maxVol) return v
+    }
+    return minVol
+  })
+
+  // Save volume to localStorage when it changes
+  useEffect(() => {
+    localStorage.setItem(`lastVol_${symbol.symbolId}`, String(volume))
+  }, [volume, symbol.symbolId])
 
   const bidPrice = formatPrice(quote?.bid, symbol.symbolId)
   const askPrice = formatPrice(quote?.ask, symbol.symbolId)
@@ -564,7 +581,6 @@ function DealScreen({
   const handleSubmit = async () => {
     setSubmitting(true)
     try {
-      const lotSize = details?.lotSize ?? 100000
       const volumeInCents = volume * 100
 
       const res = await ct.placeOrder({
@@ -577,7 +593,7 @@ function DealScreen({
       console.log("[cTrader] Order response:", res)
 
       if (res.payloadType === 2132 || res.payloadType === 2142) {
-        // Error
+        // ORDER_ERROR_EVENT or general error
         const desc = (res.description as string) || (res.errorCode as string) || "Unknown error"
         setPopup({
           type: "error",
@@ -585,17 +601,20 @@ function DealScreen({
           message: `Error description: ${desc}`,
         })
       } else {
-        // Success (execution event or other)
-        const execType = (res.executionType as string) || "ORDER_ACCEPTED"
-        const orderId = res.order ? (res.order as OAOrder).orderId : ""
-        const posId = res.position ? (res.position as OAPosition).positionId : ""
+        // Any non-error response = success (EXECUTION_EVENT 2126 or other)
+        const execType = (res.executionType as string) || ""
+        const order = res.order as Record<string, unknown> | undefined
+        const position = res.position as Record<string, unknown> | undefined
+        const orderId = order?.orderId ?? ""
+        const posId = position?.positionId ?? ""
+        const isFilled = execType.includes("FILL")
 
         setPopup({
           type: "success",
-          title: execType.includes("FILL") ? "Position opened" : "Pending order was created",
-          message: `${side} ${symbol.symbolName} order was ${execType.includes("FILL") ? "filled" : "created"}.`,
+          title: isFilled ? "Position opened" : "Pending order was created",
+          message: `${side} ${symbol.symbolName} ${isFilled ? "order was filled" : "pending order was created"}.`,
           details: {
-            Amount: `${volume.toLocaleString()} ${ct.depositAssetName}`,
+            Amount: `${volume.toLocaleString()}`,
             Price: side === "BUY" ? askPrice : bidPrice,
             ...(orderId ? { "Order ID": String(orderId) } : {}),
             ...(posId ? { "Position ID": String(posId) } : {}),
@@ -603,6 +622,7 @@ function DealScreen({
         })
       }
     } catch (err) {
+      console.error("[cTrader] Order error:", err)
       setPopup({
         type: "error",
         title: "An error occurred",
