@@ -230,20 +230,33 @@ export function useCTrader() {
       })
 
       // Listen for execution events (order fills, position changes)
-      // executionType can be string OR number enum:
-      // 2=ORDER_ACCEPTED, 3=ORDER_FILLED, 5=ORDER_CANCELLED, 11=ORDER_PARTIAL_FILL
+      // executionType: number enum or string
+      // 2=ORDER_ACCEPTED, 3=ORDER_FILLED, 4=ORDER_REPLACED,
+      // 5=ORDER_CANCELLED, 6=ORDER_EXPIRED, 7=ORDER_REJECTED,
+      // 11=ORDER_PARTIAL_FILL
+      // positionStatus: 1=OPEN, 2=CLOSED, 3=CREATED, 4=ERROR
       activeClient.on(PayloadType.OA_EXECUTION_EVENT, (msg: CTraderMessage) => {
         const et = msg.executionType
         const isFilled = et === 3 || et === 11 || et === "ORDER_FILLED" || et === "ORDER_PARTIAL_FILL"
-        const isCancelled = et === 5 || et === "ORDER_CANCELLED"
+        const isCancelled = et === 5 || et === 6 || et === 7 ||
+          et === "ORDER_CANCELLED" || et === "ORDER_EXPIRED" || et === "ORDER_REJECTED"
         const isAccepted = et === 2 || et === "ORDER_ACCEPTED"
-        const isClosed = et === "POSITION_CLOSED"
 
         if (msg.position) {
+          const pos = msg.position as OAPosition
+          // Check if position is closed (status 2) — handles close from any client
+          const positionClosed = pos.positionStatus === 2 || pos.positionStatus === "POSITION_STATUS_CLOSED"
+
           setPositions((prev) => {
-            const pos = msg.position as OAPosition
             const idx = prev.findIndex((p) => p.positionId === pos.positionId)
+
+            if (positionClosed) {
+              // Position was closed (from this client or another) — remove it
+              return prev.filter((p) => p.positionId !== pos.positionId)
+            }
+
             if (isFilled) {
+              // New position opened or updated
               if (idx >= 0) {
                 const next = [...prev]
                 next[idx] = pos
@@ -251,9 +264,8 @@ export function useCTrader() {
               }
               return [...prev, pos]
             }
-            if (isCancelled || isClosed) {
-              return prev.filter((p) => p.positionId !== pos.positionId)
-            }
+
+            // Update existing position (SL/TP change, partial close, etc.)
             if (idx >= 0) {
               const next = [...prev]
               next[idx] = pos
@@ -261,15 +273,32 @@ export function useCTrader() {
             }
             return prev
           })
+
+          // Also update trader (balance) after position close
+          if (positionClosed && accountId) {
+            activeClient.getTrader(accountId).then((res) => {
+              if (res.trader) setTrader(res.trader as OATrader)
+            }).catch(() => {})
+          }
         }
+
         if (msg.order) {
+          const ord = msg.order as OAOrder
+          // Check order status: 1=ACCEPTED, 2=FILLED, 3=REJECTED, 4=EXPIRED, 5=CANCELLED
+          const orderDone = isCancelled || isFilled ||
+            ord.orderStatus === 2 || ord.orderStatus === 3 ||
+            ord.orderStatus === 4 || ord.orderStatus === 5
+
           setOrders((prev) => {
-            const ord = msg.order as OAOrder
             const idx = prev.findIndex((o) => o.orderId === ord.orderId)
-            if (isCancelled || isFilled) {
+
+            if (orderDone) {
+              // Order filled/cancelled/expired — remove from pending
               return prev.filter((o) => o.orderId !== ord.orderId)
             }
+
             if (isAccepted) {
+              // New pending order
               if (idx >= 0) {
                 const next = [...prev]
                 next[idx] = ord
@@ -277,6 +306,8 @@ export function useCTrader() {
               }
               return [...prev, ord]
             }
+
+            // Update existing order
             if (idx >= 0) {
               const next = [...prev]
               next[idx] = ord
