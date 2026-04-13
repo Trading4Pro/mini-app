@@ -65,7 +65,21 @@ export function TradingChart({ symbolId, symbolName, digits, getTrendbars, heigh
     if (!libLoaded || !containerNodeRef.current || chartRef.current) return
     try {
       const inst = new window.T4PChart(containerNodeRef.current, {
-        general: { defaultChartType: "candles", saveLayout: false, saveIndicators: false, saveDrawings: false },
+        general: {
+          defaultChartType: "candles",
+          saveLayout: false,
+          saveIndicators: false,
+          saveDrawings: false,
+          theme: "dark",
+        },
+        colors: {
+          background: "#0d1421",
+          gridLine: "#1c2738",
+          text: "#6b7d94",
+          bull: "#00c853",
+          bear: "#ff1744",
+          wick: "#6b7d94",
+        },
       })
       chartRef.current = inst
       if (typeof inst.addEventHandler === "function") {

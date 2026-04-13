@@ -227,7 +227,7 @@ export default function TradingApp() {
   return (
     <>
       <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
-      <main className="min-h-screen flex flex-col bg-[var(--background)] text-white">
+      <main className="h-dvh flex flex-col bg-[var(--background)] text-white overflow-hidden">
         {/* ---- MENU OVERLAY ---- */}
         {menuOpen && (
           <div className="fixed inset-0 z-50 flex">
@@ -402,10 +402,6 @@ function MarketsScreen({
 }) {
   const [activeCategory, setActiveCategory] = useState("All")
 
-  const activeChartId = chartSymbolId || (symbols.length > 0 ? symbols[0].symbolId : null)
-  const activeChartSymbol = symbols.find((s) => s.symbolId === activeChartId)
-  const activeChartDetails = activeChartId ? symbolDetails.get(activeChartId) : null
-
   // Group symbols by asset class
   const grouped = useMemo(() => {
     const groups = new Map<string, OALightSymbol[]>()
@@ -423,6 +419,11 @@ function MarketsScreen({
     if (activeCategory === "All") return symbols
     return grouped.get(activeCategory) || []
   }, [activeCategory, symbols, grouped])
+
+  // Chart follows first symbol of the visible category
+  const activeChartId = visibleSymbols.length > 0 ? visibleSymbols[0].symbolId : null
+  const activeChartSymbol = visibleSymbols.length > 0 ? visibleSymbols[0] : null
+  const activeChartDetails = activeChartId ? symbolDetails.get(activeChartId) : null
 
   // Layout: flex column, symbol list scrolls, chart stays at bottom
   return (
@@ -606,13 +607,18 @@ function DealScreen({
           message: `Error description: ${desc}`,
         })
       } else {
-        // Any non-error response = success (EXECUTION_EVENT 2126 or other)
-        const execType = (res.executionType as string) || ""
+        // Success (EXECUTION_EVENT 2126 or other)
+        // executionType can be a number (enum) or string:
+        // 2=ORDER_ACCEPTED, 3=ORDER_FILLED, 11=ORDER_PARTIAL_FILL
+        const execTypeRaw = res.executionType
+        const isFilled = execTypeRaw === 3 || execTypeRaw === 11 ||
+          String(execTypeRaw).includes("FILL")
+        const isAccepted = execTypeRaw === 2 || String(execTypeRaw) === "ORDER_ACCEPTED"
+
         const order = res.order as Record<string, unknown> | undefined
         const position = res.position as Record<string, unknown> | undefined
         const orderId = order?.orderId ?? ""
         const posId = position?.positionId ?? ""
-        const isFilled = execType.includes("FILL")
 
         setPopup({
           type: "success",
@@ -625,6 +631,9 @@ function DealScreen({
             ...(posId ? { "Position ID": String(posId) } : {}),
           },
         })
+
+        // Save last traded volume
+        localStorage.setItem(`lastVol_${symbol.symbolId}`, String(volume))
       }
     } catch (err) {
       console.error("[cTrader] Order error:", err)
@@ -704,19 +713,34 @@ function DealScreen({
             <div className="flex gap-2">
               <button
                 className="w-12 h-10 rounded bg-[var(--card)] border border-[var(--border)] flex items-center justify-center text-white text-lg"
-                onClick={() => setVolume((v) => Math.max(minVol, v - stepVol))}
+                onClick={() => setVolume((v) => {
+                  const next = v - stepVol
+                  // Snap to nearest step multiple
+                  const snapped = Math.round(next / stepVol) * stepVol
+                  return Math.max(minVol, snapped)
+                })}
               >
                 −
               </button>
               <input
                 type="number"
                 value={volume}
-                onChange={(e) => setVolume(Number(e.target.value) || minVol)}
+                onChange={(e) => {
+                  const v = Number(e.target.value)
+                  if (!v || v < minVol) { setVolume(minVol); return }
+                  if (v > maxVol) { setVolume(maxVol); return }
+                  // Snap to nearest step
+                  setVolume(Math.round(v / stepVol) * stepVol)
+                }}
                 className="flex-1 h-10 text-center rounded bg-[var(--card)] border border-[var(--border)] text-[var(--primary)] font-mono text-sm outline-none"
               />
               <button
                 className="w-12 h-10 rounded bg-[var(--card)] border border-[var(--border)] flex items-center justify-center text-white text-lg"
-                onClick={() => setVolume((v) => Math.min(maxVol, v + stepVol))}
+                onClick={() => setVolume((v) => {
+                  const next = v + stepVol
+                  const snapped = Math.round(next / stepVol) * stepVol
+                  return Math.min(maxVol, snapped)
+                })}
               >
                 +
               </button>

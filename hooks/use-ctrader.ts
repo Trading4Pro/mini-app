@@ -230,13 +230,20 @@ export function useCTrader() {
       })
 
       // Listen for execution events (order fills, position changes)
+      // executionType can be string OR number enum:
+      // 2=ORDER_ACCEPTED, 3=ORDER_FILLED, 5=ORDER_CANCELLED, 11=ORDER_PARTIAL_FILL
       activeClient.on(PayloadType.OA_EXECUTION_EVENT, (msg: CTraderMessage) => {
-        const executionType = msg.executionType as string
+        const et = msg.executionType
+        const isFilled = et === 3 || et === 11 || et === "ORDER_FILLED" || et === "ORDER_PARTIAL_FILL"
+        const isCancelled = et === 5 || et === "ORDER_CANCELLED"
+        const isAccepted = et === 2 || et === "ORDER_ACCEPTED"
+        const isClosed = et === "POSITION_CLOSED"
+
         if (msg.position) {
           setPositions((prev) => {
             const pos = msg.position as OAPosition
             const idx = prev.findIndex((p) => p.positionId === pos.positionId)
-            if (executionType === "ORDER_FILLED" || executionType === "ORDER_PARTIAL_FILL") {
+            if (isFilled) {
               if (idx >= 0) {
                 const next = [...prev]
                 next[idx] = pos
@@ -244,7 +251,7 @@ export function useCTrader() {
               }
               return [...prev, pos]
             }
-            if (executionType === "ORDER_CANCELLED" || executionType === "POSITION_CLOSED") {
+            if (isCancelled || isClosed) {
               return prev.filter((p) => p.positionId !== pos.positionId)
             }
             if (idx >= 0) {
@@ -259,10 +266,10 @@ export function useCTrader() {
           setOrders((prev) => {
             const ord = msg.order as OAOrder
             const idx = prev.findIndex((o) => o.orderId === ord.orderId)
-            if (executionType === "ORDER_CANCELLED" || executionType === "ORDER_FILLED") {
+            if (isCancelled || isFilled) {
               return prev.filter((o) => o.orderId !== ord.orderId)
             }
-            if (executionType === "ORDER_ACCEPTED") {
+            if (isAccepted) {
               if (idx >= 0) {
                 const next = [...prev]
                 next[idx] = ord
