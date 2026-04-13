@@ -67,6 +67,8 @@ export default function TradingApp() {
   const [orderSide, setOrderSide] = useState<"BUY" | "SELL">("BUY")
   const [orderVolume, setOrderVolume] = useState("0.01")
   const [orderSubmitting, setOrderSubmitting] = useState(false)
+  const [orderError, setOrderError] = useState<string | null>(null)
+  const [orderSuccess, setOrderSuccess] = useState(false)
   const [activityTab, setActivityTab] = useState<"positions" | "orders">("positions")
 
   // Initialize Telegram WebApp
@@ -112,20 +114,44 @@ export default function TradingApp() {
   const handlePlaceOrder = async () => {
     if (!orderDialog) return
     setOrderSubmitting(true)
+    setOrderError(null)
+    setOrderSuccess(false)
     try {
       const details = symbolDetails.get(orderDialog.symbol.symbolId)
       const lotSize = details?.lotSize ?? 100000
       const volumeInCents = Math.round(parseFloat(orderVolume) * lotSize * 100)
 
-      await placeOrder({
+      const res = await placeOrder({
         symbolId: orderDialog.symbol.symbolId,
         tradeSide: orderSide === "BUY" ? TRADE_SIDE.BUY : TRADE_SIDE.SELL,
         volume: volumeInCents,
         orderType: ORDER_TYPE.MARKET,
       })
-      setOrderDialog(null)
+
+      console.log("[cTrader] Order response:", res)
+
+      // Check for error responses
+      if (res.payloadType === 2132 || res.payloadType === 2142) {
+        // ORDER_ERROR_EVENT or general error
+        const errMsg = (res.description as string) || (res.errorCode as string) || "Order rejected"
+        setOrderError(errMsg)
+      } else if (res.payloadType === 2126) {
+        // EXECUTION_EVENT - order was processed
+        const execType = res.executionType as string
+        if (execType === "ORDER_FILLED" || execType === "ORDER_ACCEPTED") {
+          setOrderSuccess(true)
+          setTimeout(() => setOrderDialog(null), 1200)
+        } else if (execType === "ORDER_REJECTED" || execType === "ORDER_CANCELLED") {
+          setOrderError(`Order ${execType.toLowerCase().replace("order_", "")}`)
+        }
+      } else {
+        // Unknown response but no error - assume success
+        setOrderSuccess(true)
+        setTimeout(() => setOrderDialog(null), 1200)
+      }
     } catch (err) {
       console.error("Order failed:", err)
+      setOrderError(err instanceof Error ? err.message : "Order failed")
     } finally {
       setOrderSubmitting(false)
     }
@@ -382,12 +408,14 @@ export default function TradingApp() {
                       <button
                         key={symbol.symbolId}
                         className="w-full px-3 py-3 flex items-center justify-between hover:bg-accent/50 transition-colors text-left"
-                        onClick={() =>
+                        onClick={() => {
+                          setOrderError(null)
+                          setOrderSuccess(false)
                           setOrderDialog({
                             symbol,
                             details: symbolDetails.get(symbol.symbolId),
                           })
-                        }
+                        }}
                       >
                         <div className="flex items-center gap-2">
                           {hasPosition && (
@@ -712,6 +740,18 @@ export default function TradingApp() {
               </div>
             </div>
 
+            {/* Order feedback */}
+            {orderError && (
+              <div className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20">
+                <p className="text-red-500 text-sm text-center">{orderError}</p>
+              </div>
+            )}
+            {orderSuccess && (
+              <div className="px-3 py-2 rounded-lg bg-green-500/10 border border-green-500/20">
+                <p className="text-green-500 text-sm text-center font-medium">Order filled!</p>
+              </div>
+            )}
+
             <DialogFooter className="mt-2">
               <button
                 className={`w-full py-3 rounded-lg font-bold text-white text-sm transition-colors disabled:opacity-50 ${
@@ -720,7 +760,7 @@ export default function TradingApp() {
                     : "bg-red-600 hover:bg-red-700"
                 }`}
                 onClick={handlePlaceOrder}
-                disabled={orderSubmitting}
+                disabled={orderSubmitting || orderSuccess}
               >
                 {orderSubmitting ? (
                   <Spinner className="size-5 mx-auto" />
