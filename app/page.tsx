@@ -842,14 +842,19 @@ function MarketsScreen({
                 {symbolPositions.map((pos) => {
                   const isBuy = pos.tradeData.tradeSide === TRADE_SIDE.BUY
                   const currentPrice = isBuy ? quote?.bid : quote?.ask
-                  // pos.price is a float; quote.bid/ask are int scaled by 10^digits
-                  const entry = pos.price > 100 ? pos.price / 100000 : pos.price
                   const scale = Math.pow(10, details?.digits ?? 5)
+                  const rawPrice = (pos as unknown as { price?: number; executionPrice?: number; openPrice?: number }).price
+                    ?? (pos as unknown as { executionPrice?: number }).executionPrice
+                    ?? (pos as unknown as { openPrice?: number }).openPrice
+                  const entry = rawPrice == null ? null
+                    : rawPrice > 100 ? rawPrice / scale : rawPrice
                   const current = currentPrice ? currentPrice / scale : null
                   const units = pos.tradeData.volume / 100
-                  // Monetary PnL in quote currency (approx; accurate for USD-quoted pairs).
-                  // cTrader adds closing commission/swap so values will differ by a few.
-                  const pnlMoney = current !== null ? (isBuy ? current - entry : entry - current) * units : null
+                  // Only compute PnL when we have a valid entry (>0.001) AND current price
+                  const pnlMoney =
+                    entry !== null && entry > 0.001 && current !== null
+                      ? (isBuy ? current - entry : entry - current) * units
+                      : null
                   return (
                     <div key={pos.positionId} className="flex items-center gap-2 mt-2 pt-1.5 border-t border-[var(--border)]">
                       <span
@@ -1347,11 +1352,18 @@ function ActivityScreen({
               const currentPrice = isBuy ? quote?.bid : quote?.ask
               const digits = details?.digits ?? 5
               const scale = Math.pow(10, digits)
-              const entry = pos.price > 100 ? pos.price / 100000 : pos.price
+              const rawPrice = (pos as unknown as { price?: number; executionPrice?: number; openPrice?: number }).price
+                ?? (pos as unknown as { executionPrice?: number }).executionPrice
+                ?? (pos as unknown as { openPrice?: number }).openPrice
+              const entry = rawPrice == null ? null
+                : rawPrice > 100 ? rawPrice / scale : rawPrice
               const current = currentPrice ? currentPrice / scale : null
               const units = pos.tradeData.volume / 100
-              // approximate $ PnL — assumes USD-quoted pair; cTrader adds commission/swap
-              const pnlMoney = current !== null ? (isBuy ? current - entry : entry - current) * units : null
+              // Only compute PnL when we have valid entry AND current — avoid bogus values
+              const pnlMoney =
+                entry !== null && entry > 0.001 && current !== null
+                  ? (isBuy ? current - entry : entry - current) * units
+                  : null
               const expanded = expandedPosition === pos.positionId
 
               return (
@@ -1391,7 +1403,7 @@ function ActivityScreen({
                     <div className="px-3 pb-3 space-y-1.5">
                       <DetailRow label="Position ID" value={String(pos.positionId)} />
                       <DetailRow label="Amount" value={formatVolume(pos.tradeData.volume)} />
-                      <DetailRow label="Open price" value={entry.toFixed(digits)} />
+                      <DetailRow label="Open price" value={entry !== null ? entry.toFixed(digits) : "—"} />
                       {current && <DetailRow label="Current rate" value={current.toFixed(digits)} />}
                       {pos.stopLoss && <DetailRow label="Stop Loss" value={(pos.stopLoss / 100000).toFixed(digits)} />}
                       {pos.takeProfit && <DetailRow label="Take Profit" value={(pos.takeProfit / 100000).toFixed(digits)} />}
