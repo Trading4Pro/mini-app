@@ -612,20 +612,76 @@ function classifySymbol(name: string): string {
   return "Forex"
 }
 
-// Currency code → emoji flag (rough mapping for major currencies)
-const FLAG_MAP: Record<string, string> = {
-  USD: "🇺🇸", EUR: "🇪🇺", GBP: "🇬🇧", JPY: "🇯🇵", CHF: "🇨🇭",
-  AUD: "🇦🇺", CAD: "🇨🇦", NZD: "🇳🇿", SGD: "🇸🇬", HKD: "🇭🇰",
-  SEK: "🇸🇪", NOK: "🇳🇴", DKK: "🇩🇰", MXN: "🇲🇽", ZAR: "🇿🇦",
-  PLN: "🇵🇱", TRY: "🇹🇷", CNH: "🇨🇳", RUB: "🇷🇺", BRL: "🇧🇷",
-  XAU: "🥇", XAG: "🥈", XPT: "🔘", XPD: "🔘",
-  BTC: "₿", ETH: "Ξ", LTC: "Ł", XRP: "✕",
+// Currency code → colour + short label for custom flag badge
+const CCY_STYLE: Record<string, { bg: string; fg: string; stripe?: string }> = {
+  USD: { bg: "#0A3161", fg: "#fff", stripe: "#B22234" },
+  EUR: { bg: "#003399", fg: "#FFCC00" },
+  GBP: { bg: "#012169", fg: "#fff", stripe: "#C8102E" },
+  JPY: { bg: "#fff", fg: "#BC002D", stripe: "#BC002D" },
+  CHF: { bg: "#D52B1E", fg: "#fff" },
+  AUD: { bg: "#012169", fg: "#fff", stripe: "#E4002B" },
+  CAD: { bg: "#D52B1E", fg: "#fff" },
+  NZD: { bg: "#012169", fg: "#fff" },
+  SGD: { bg: "#ED2939", fg: "#fff" },
+  HKD: { bg: "#DE2910", fg: "#fff" },
+  SEK: { bg: "#006AA7", fg: "#FECC00" },
+  NOK: { bg: "#BA0C2F", fg: "#fff" },
+  DKK: { bg: "#C60C30", fg: "#fff" },
+  MXN: { bg: "#006847", fg: "#fff", stripe: "#CE1126" },
+  ZAR: { bg: "#007749", fg: "#FFB81C" },
+  PLN: { bg: "#fff", fg: "#DC143C", stripe: "#DC143C" },
+  TRY: { bg: "#E30A17", fg: "#fff" },
+  CNH: { bg: "#DE2910", fg: "#FFDE00" },
+  RUB: { bg: "#fff", fg: "#1C3578", stripe: "#D52B1E" },
+  BRL: { bg: "#009739", fg: "#FEDD00" },
+  XAU: { bg: "#FFC107", fg: "#3A2A00" },
+  XAG: { bg: "#BFC6CC", fg: "#2C2C2C" },
+  XPT: { bg: "#8D8D8D", fg: "#fff" },
+  XPD: { bg: "#5A5A5A", fg: "#fff" },
+  BTC: { bg: "#F7931A", fg: "#fff" },
+  ETH: { bg: "#627EEA", fg: "#fff" },
+  LTC: { bg: "#345D9D", fg: "#fff" },
+  XRP: { bg: "#000", fg: "#fff" },
+  DOGE: { bg: "#C3A634", fg: "#fff" },
+  SOL: { bg: "#9945FF", fg: "#fff" },
 }
-function flagsForSymbol(name: string): string {
+function currencyPairFromName(name: string): [string, string | null] {
   const up = name.toUpperCase().replace(/[^A-Z]/g, "")
-  if (up.length >= 6) return (FLAG_MAP[up.slice(0, 3)] || "") + (FLAG_MAP[up.slice(3, 6)] || "")
-  if (up.length >= 3) return FLAG_MAP[up.slice(0, 3)] || ""
-  return ""
+  if (up.length >= 6) return [up.slice(0, 3), up.slice(3, 6)]
+  if (up.length >= 3) return [up.slice(0, 3), null]
+  return [up, null]
+}
+function CurrencyBadge({ code, size = 20 }: { code: string; size?: number }) {
+  const style = CCY_STYLE[code] || { bg: "#404358", fg: "#fff" }
+  return (
+    <span
+      className="inline-flex items-center justify-center rounded-full font-bold leading-none select-none"
+      style={{
+        width: size,
+        height: size,
+        background: style.stripe
+          ? `linear-gradient(180deg, ${style.bg} 0%, ${style.bg} 50%, ${style.stripe} 50%, ${style.stripe} 100%)`
+          : style.bg,
+        color: style.fg,
+        fontSize: Math.round(size * 0.42),
+        letterSpacing: "-0.02em",
+      }}
+    >
+      {code.slice(0, 3)}
+    </span>
+  )
+}
+function PairBadge({ name, size = 20 }: { name: string; size?: number }) {
+  const [a, b] = currencyPairFromName(name)
+  if (!b) return <CurrencyBadge code={a} size={size} />
+  return (
+    <span className="inline-flex items-center" style={{ width: size + 10 }}>
+      <CurrencyBadge code={a} size={size} />
+      <span style={{ marginLeft: -8, zIndex: 1 }}>
+        <CurrencyBadge code={b} size={size} />
+      </span>
+    </span>
+  )
 }
 
 function MarketsScreen({
@@ -673,8 +729,17 @@ function MarketsScreen({
   }, [symbols])
 
   const categories = useMemo(() => {
-    const dynamicCats = Array.from(grouped.keys()).sort()
-    return ["Favorites", ...dynamicCats]
+    const preferredOrder = ["Forex", "Metals", "Indices", "Energy", "Crypto", "Stocks"]
+    const dynamicCats = Array.from(grouped.keys())
+    const sorted = dynamicCats.sort((a, b) => {
+      const ia = preferredOrder.indexOf(a)
+      const ib = preferredOrder.indexOf(b)
+      if (ia === -1 && ib === -1) return a.localeCompare(b)
+      if (ia === -1) return 1
+      if (ib === -1) return -1
+      return ia - ib
+    })
+    return ["Favorites", ...sorted]
   }, [grouped])
 
   const visibleSymbols = useMemo(() => {
@@ -726,7 +791,6 @@ function MarketsScreen({
           const bid = quote?.bid ? quote.bid / 100000 : undefined
           const ask = quote?.ask ? quote.ask / 100000 : undefined
           const fav = favorites.has(symbol.symbolId)
-          const flags = flagsForSymbol(symbol.symbolName)
           const seed = symbol.symbolId
           const pctChange = ((seed * 9301 + 49297) % 2333) / 100 - 11
           const pctColor = pctChange >= 0 ? "var(--color-buy)" : "var(--color-sell)"
@@ -735,7 +799,7 @@ function MarketsScreen({
             <div key={symbol.symbolId} className="border-b border-[var(--border)]">
               <div className="px-3 py-2.5">
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="text-base leading-none">{flags || "🌐"}</span>
+                  <PairBadge name={symbol.symbolName} size={22} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-white text-[15px] font-semibold truncate">{symbol.symbolName}</span>
@@ -778,10 +842,11 @@ function MarketsScreen({
                 {symbolPositions.map((pos) => {
                   const isBuy = pos.tradeData.tradeSide === TRADE_SIDE.BUY
                   const currentPrice = isBuy ? quote?.bid : quote?.ask
-                  const pipPos = details?.pipPosition ?? 4
                   const entry = pos.price / 100000
                   const current = currentPrice ? currentPrice / 100000 : null
-                  const pnlPips = current ? (isBuy ? (current - entry) : (entry - current)) * Math.pow(10, pipPos) : null
+                  const units = pos.tradeData.volume / 100
+                  // Monetary PnL in quote currency (approx; accurate for USD-quoted pairs)
+                  const pnlMoney = current !== null ? (isBuy ? current - entry : entry - current) * units : null
                   return (
                     <div key={pos.positionId} className="flex items-center gap-2 mt-2 pt-1.5 border-t border-[var(--border)]">
                       <span
@@ -791,14 +856,14 @@ function MarketsScreen({
                         {isBuy ? "Buy" : "Sell"}
                       </span>
                       <span className="text-white text-xs tabular-nums">
-                        {formatVolume(pos.tradeData.volume)}
+                        {units.toLocaleString()}
                       </span>
-                      {pnlPips !== null && (
+                      {pnlMoney !== null && (
                         <span
                           className="ml-auto font-mono text-xs font-semibold tabular-nums"
-                          style={{ color: pnlPips >= 0 ? "var(--color-buy)" : "var(--color-sell)" }}
+                          style={{ color: pnlMoney >= 0 ? "var(--color-buy)" : "var(--color-sell)" }}
                         >
-                          {pnlPips >= 0 ? "+" : ""}{pnlPips.toFixed(2)}$
+                          {pnlMoney >= 0 ? "+" : ""}{pnlMoney.toFixed(2)} $
                         </span>
                       )}
                       <button
@@ -890,8 +955,6 @@ function DealScreen({
   const ask = quote?.ask ? quote.ask / 100000 : 0
   const expectedMargin = volume * 0.01 // placeholder until ExpectedMarginReq wired
 
-  const flags = flagsForSymbol(symbol.symbolName)
-
   const handleSubmit = async () => {
     setSubmitting(true)
     try {
@@ -950,7 +1013,7 @@ function DealScreen({
       <div className="flex-1 overflow-y-auto thin-scrollbar">
         {/* Symbol row */}
         <div className="px-4 py-3 flex items-center gap-3 border-b border-[var(--border)]">
-          <span className="text-xl">{flags || "🌐"}</span>
+          <PairBadge name={symbol.symbolName} size={28} />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <span className="text-white font-semibold">{symbol.symbolName}</span>
@@ -1283,7 +1346,9 @@ function ActivityScreen({
               const pipPos = details?.pipPosition ?? 4
               const entry = pos.price / 100000
               const current = currentPrice ? currentPrice / 100000 : null
-              const pnlPips = current ? (isBuy ? (current - entry) : (entry - current)) * Math.pow(10, pipPos) : null
+              const units = pos.tradeData.volume / 100
+              // approximate $ PnL — assumes USD-quoted pair
+              const pnlMoney = current !== null ? (isBuy ? current - entry : entry - current) * units : null
               const expanded = expandedPosition === pos.positionId
 
               return (
@@ -1292,7 +1357,8 @@ function ActivityScreen({
                     className="w-full px-3 py-3 flex items-center gap-2 text-left"
                     onClick={() => setExpandedPosition(expanded ? null : pos.positionId)}
                   >
-                    <span className="text-white text-[13px] font-semibold min-w-[60px]">{symName}...</span>
+                    <PairBadge name={symName} size={18} />
+                    <span className="text-white text-[13px] font-semibold">{symName}</span>
                     <span
                       className="px-1.5 py-px rounded text-[10px] font-bold uppercase tracking-wider"
                       style={{
@@ -1303,13 +1369,13 @@ function ActivityScreen({
                       {isBuy ? "Buy" : "Sell"}
                     </span>
                     <span className="text-white text-[13px] tabular-nums">
-                      {formatVolume(pos.tradeData.volume)}
+                      {units.toLocaleString()}
                     </span>
                     <span
                       className="ml-auto text-[13px] font-mono font-semibold tabular-nums"
-                      style={{ color: pnlPips !== null && pnlPips >= 0 ? "var(--color-buy)" : "var(--color-sell)" }}
+                      style={{ color: pnlMoney !== null && pnlMoney >= 0 ? "var(--color-buy)" : "var(--color-sell)" }}
                     >
-                      {pnlPips !== null ? `${pnlPips >= 0 ? "" : ""}${pnlPips.toFixed(2)}$` : "—"}
+                      {pnlMoney !== null ? `${pnlMoney >= 0 ? "+" : ""}${pnlMoney.toFixed(2)} $` : "—"}
                     </span>
                     {expanded ? (
                       <ChevronUpIcon className="size-4 text-[var(--muted-foreground)]" />
@@ -1358,7 +1424,8 @@ function ActivityScreen({
 
               return (
                 <div key={ord.orderId} className="border-b border-[var(--border)] px-3 py-3 flex items-center gap-2">
-                  <span className="text-white text-[13px] font-semibold min-w-[60px]">{symName}...</span>
+                  <PairBadge name={symName} size={18} />
+                  <span className="text-white text-[13px] font-semibold">{symName}</span>
                   <span
                     className="px-1.5 py-px rounded text-[10px] font-bold uppercase tracking-wider text-white"
                     style={{ background: isBuy ? "var(--primary-accent)" : "var(--color-sell)" }}

@@ -78,22 +78,30 @@ export function TradingChart({ symbolId, symbolName, digits, getTrendbars, heigh
     if (!libLoaded || !containerNodeRef.current || chartRef.current) return
     try {
       const inst = new window.T4PChart(containerNodeRef.current, {
+        theme: "dark",
         general: {
           defaultChartType: "candles",
           saveLayout: false,
           saveIndicators: false,
           saveDrawings: false,
           theme: "dark",
+          skin: "dark",
         },
         colors: {
-          background: "#0d1421",
-          gridLine: "#1c2738",
-          text: "#6b7d94",
-          bull: "#00c853",
-          bear: "#ff1744",
-          wick: "#6b7d94",
+          background: "#1B1C28",
+          chartBackground: "#1B1C28",
+          panelBackground: "#1B1C28",
+          gridLine: "#2E303C",
+          text: "#8A8E9C",
+          axisText: "#8A8E9C",
+          bull: "#049F30",
+          bear: "#EF6161",
+          wick: "#8A8E9C",
+          crosshair: "#4F6FE3",
         },
       })
+      // Some builds apply theme only via method
+      if (typeof inst.setTheme === "function") { try { inst.setTheme("dark") } catch { /* ignore */ } }
       chartRef.current = inst
       if (typeof inst.addEventHandler === "function") {
         inst.addEventHandler("onChartReady", () => setChartReady(true))
@@ -246,14 +254,14 @@ export function TradingChart({ symbolId, symbolName, digits, getTrendbars, heigh
         ))}
         <span className="ml-auto text-[var(--muted-foreground)] text-xs self-center">{symbolName}</span>
       </div>
-      <div className="relative chart-dark-container" style={{ height: chartHeight, background: "#0d1421" }}>
+      <div className="relative chart-dark-container" style={{ height: chartHeight, background: "#1B1C28" }}>
         {error && !loading && (
-          <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: "#0d1421" }}>
+          <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: "#1B1C28" }}>
             <p className="text-[var(--muted-foreground)] text-xs">{error}</p>
           </div>
         )}
         {(loading || !libLoaded) && (
-          <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: "#0d1421" }}>
+          <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: "#1B1C28" }}>
             <Spinner className="size-6 text-[var(--primary)]" />
           </div>
         )}
