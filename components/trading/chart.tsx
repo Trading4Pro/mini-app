@@ -2,18 +2,21 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Spinner } from "@/components/ui/spinner"
+import {
+  createChart,
+  CandlestickSeries,
+  HistogramSeries,
+  CrosshairMode,
+  ColorType,
+  type IChartApi,
+  type ISeriesApi,
+  type Time,
+} from "lightweight-charts"
 
 export const TrendbarPeriod = {
   M1: 1, M2: 2, M5: 3, M10: 4, M15: 5, M30: 6,
   H1: 7, H4: 8, H12: 9, D1: 10, W1: 11, MN1: 12,
 } as const
-
-const periodToLibTimeframe: Record<number, string> = {
-  [TrendbarPeriod.M1]: "1M", [TrendbarPeriod.M5]: "5M",
-  [TrendbarPeriod.M15]: "15M", [TrendbarPeriod.M30]: "30M",
-  [TrendbarPeriod.H1]: "1H", [TrendbarPeriod.H4]: "4H",
-  [TrendbarPeriod.D1]: "1D",
-}
 
 const periodToMs: Record<number, number> = {
   [TrendbarPeriod.M1]: 60_000, [TrendbarPeriod.M5]: 5 * 60_000,
@@ -22,7 +25,6 @@ const periodToMs: Record<number, number> = {
   [TrendbarPeriod.D1]: 24 * 60 * 60_000,
 }
 
-// Raw trendbar from cTrader JSON API
 interface RawTrendbar {
   low: number | string
   deltaOpen: number | string
@@ -43,155 +45,153 @@ interface TradingChartProps {
 }
 
 export function TradingChart({ symbolId, symbolName, digits, getTrendbars, height = 200 }: TradingChartProps) {
-  const chartRef = useRef<any>(null)
-  const containerNodeRef = useRef<HTMLDivElement | null>(null)
-  const [chartReady, setChartReady] = useState(false)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const chartRef = useRef<IChartApi | null>(null)
+  const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null)
+  const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [period, setPeriod] = useState(TrendbarPeriod.M5)
-  const [libLoaded, setLibLoaded] = useState(false)
+  const [period, setPeriod] = useState<number>(TrendbarPeriod.M5)
+  const [chartHeight, setChartHeight] = useState(height)
 
-  // Dynamically load chart-api.min.js and wait for T4PChart
+  // Create chart
   useEffect(() => {
-    if (window.T4PChart) { setLibLoaded(true); return }
+    if (!containerRef.current || chartRef.current) return
 
-    // Check if script already exists
-    if (!document.querySelector('script[src="/chart-api.min.js"]')) {
-      const script = document.createElement("script")
-      script.src = "/chart-api.min.js"
-      script.async = true
-      script.onload = () => {
-        if (window.T4PChart) setLibLoaded(true)
+    const chart = createChart(containerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: "#1B1C28" },
+        textColor: "#8A8E9C",
+        fontSize: 11,
+        fontFamily: "Inter, system-ui, sans-serif",
+      },
+      grid: {
+        vertLines: { color: "#2A2D3A" },
+        horzLines: { color: "#2A2D3A" },
+      },
+      crosshair: {
+        mode: CrosshairMode.Normal,
+        vertLine: { color: "#4F6FE3", style: 3, width: 1 },
+        horzLine: { color: "#4F6FE3", style: 3, width: 1 },
+      },
+      rightPriceScale: {
+        borderColor: "#2E303C",
+        scaleMargins: { top: 0.08, bottom: 0.25 },
+      },
+      timeScale: {
+        borderColor: "#2E303C",
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      width: containerRef.current.clientWidth,
+      height: chartHeight,
+      autoSize: true,
+    })
+
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      upColor: "#049F30",
+      downColor: "#EF6161",
+      borderUpColor: "#049F30",
+      borderDownColor: "#EF6161",
+      wickUpColor: "#049F30",
+      wickDownColor: "#EF6161",
+      priceFormat: { type: "price", precision: digits, minMove: 1 / Math.pow(10, digits) },
+    })
+
+    const volumeSeries = chart.addSeries(HistogramSeries, {
+      color: "#2A43B6",
+      priceFormat: { type: "volume" },
+      priceScaleId: "",
+    })
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: { top: 0.8, bottom: 0 },
+    })
+
+    chartRef.current = chart
+    candleSeriesRef.current = candleSeries
+    volumeSeriesRef.current = volumeSeries
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (containerRef.current && chartRef.current) {
+        chartRef.current.applyOptions({
+          width: containerRef.current.clientWidth,
+          height: chartHeight,
+        })
       }
-      document.body.appendChild(script)
-    }
+    })
+    resizeObserver.observe(containerRef.current)
 
-    // Poll as fallback
-    const interval = setInterval(() => {
-      if (window.T4PChart) { setLibLoaded(true); clearInterval(interval) }
-    }, 500)
-    return () => clearInterval(interval)
+    return () => {
+      resizeObserver.disconnect()
+      chart.remove()
+      chartRef.current = null
+      candleSeriesRef.current = null
+      volumeSeriesRef.current = null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Initialize chart
+  // Update precision when digits change
   useEffect(() => {
-    if (!libLoaded || !containerNodeRef.current || chartRef.current) return
-    try {
-      const inst = new window.T4PChart(containerNodeRef.current, {
-        theme: "dark",
-        general: {
-          defaultChartType: "candles",
-          saveLayout: false,
-          saveIndicators: false,
-          saveDrawings: false,
-          theme: "dark",
-          skin: "dark",
-        },
-        colors: {
-          background: "#1B1C28",
-          chartBackground: "#1B1C28",
-          panelBackground: "#1B1C28",
-          gridLine: "#2E303C",
-          text: "#8A8E9C",
-          axisText: "#8A8E9C",
-          bull: "#049F30",
-          bear: "#EF6161",
-          wick: "#8A8E9C",
-          crosshair: "#4F6FE3",
-        },
+    if (candleSeriesRef.current) {
+      candleSeriesRef.current.applyOptions({
+        priceFormat: { type: "price", precision: digits, minMove: 1 / Math.pow(10, digits) },
       })
-      // Some builds apply theme only via method
-      if (typeof inst.setTheme === "function") { try { inst.setTheme("dark") } catch { /* ignore */ } }
-      chartRef.current = inst
-      if (typeof inst.addEventHandler === "function") {
-        inst.addEventHandler("onChartReady", () => setChartReady(true))
-      } else {
-        setChartReady(true)
-      }
-    } catch (err) {
-      setError("Chart init failed: " + (err instanceof Error ? err.message : String(err)))
     }
-  }, [libLoaded])
+  }, [digits])
 
   // Load data
-  useEffect(() => {
-    if (!chartReady || !chartRef.current) return
-    const chart = chartRef.current
-    const libTimeframe = periodToLibTimeframe[period] || "5M"
-    const barMs = periodToMs[period] || 5 * 60_000
-    const toMs = Date.now()
-    const fromMs = toMs - 500 * barMs
-    let cancelled = false
+  const loadData = useCallback(async () => {
+    if (!candleSeriesRef.current || !volumeSeriesRef.current) return
+    setLoading(true)
+    setError(null)
+    try {
+      const barMs = periodToMs[period] || 5 * 60_000
+      const toMs = Date.now()
+      const fromMs = toMs - 500 * barMs
 
-    const loadData = async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        if (typeof chart.showLoader === "function") chart.showLoader()
-
-        // Set symbol & timeframe BEFORE pushing data
-        if (typeof chart.setSymbol === "function") chart.setSymbol(symbolName)
-        if (typeof chart.setDisplayName === "function") chart.setDisplayName(symbolName)
-        if (typeof chart.setTimeframe === "function") chart.setTimeframe(libTimeframe)
-        if (typeof chart.clearDrawings === "function") chart.clearDrawings()
-
-        const res = await getTrendbars(symbolId, period, fromMs, toMs)
-        if (cancelled) return
-
-        const rawBars = (res.trendbar as RawTrendbar[]) || []
-        if (rawBars.length === 0) { setError("No chart data"); return }
-
-        // Set precision
-        if (typeof chart.setDecimals === "function") chart.setDecimals(symbolName, digits)
-        if (chart.data && typeof chart.data.setSymbols === "function") chart.data.setSymbols([symbolName])
-        if (chart.data && typeof chart.data.setSchedule === "function") {
-          chart.data.setSchedule(symbolName, [{ start: 0, end: 10080 }], 0)
-        }
-        if (chart.data && typeof chart.data.empty === "function") {
-          try { chart.data.empty(symbolName, libTimeframe) } catch { /* ignore */ }
-        }
-
-        // Convert trendbars: OHLC are deltas from low, timestamp is in minutes
-        const divisor = Math.pow(10, digits)
-        const candles = rawBars.map((b) => {
-          const low = Number(b.low)
-          const dO = Number(b.deltaOpen ?? 0)
-          const dH = Number(b.deltaHigh ?? 0)
-          const dC = Number(b.deltaClose ?? 0)
-          return {
-            symbol: symbolName,
-            timeframe: libTimeframe,
-            timestamp: Number(b.utcTimestampInMinutes) * 60, // minutes → seconds
-            open: (low + dO) / divisor,
-            high: (low + dH) / divisor,
-            low: low / divisor,
-            close: (low + dC) / divisor,
-            volume_buy: Number(b.volume) || 0,
-            volume_sell: 0,
-          }
-        })
-
-        if (chart.data && typeof chart.data.setCandles === "function") {
-          chart.data.setCandles(candles)
-        }
-      } catch (err) {
-        if (!cancelled) {
-          console.error("[Chart] Load error:", err)
-          setError(err instanceof Error ? err.message : "Chart load failed")
-        }
-      } finally {
-        if (!cancelled) {
-          if (typeof chart?.hideLoader === "function") chart.hideLoader()
-          setLoading(false)
-        }
+      const res = await getTrendbars(symbolId, period, fromMs, toMs)
+      const rawBars = (res.trendbar as RawTrendbar[]) || []
+      if (rawBars.length === 0) {
+        setError("No chart data")
+        candleSeriesRef.current.setData([])
+        volumeSeriesRef.current.setData([])
+        return
       }
+
+      const divisor = Math.pow(10, digits)
+      const candles = rawBars.map((b) => {
+        const low = Number(b.low)
+        const dO = Number(b.deltaOpen ?? 0)
+        const dH = Number(b.deltaHigh ?? 0)
+        const dC = Number(b.deltaClose ?? 0)
+        return {
+          time: (Number(b.utcTimestampInMinutes) * 60) as Time,
+          open: (low + dO) / divisor,
+          high: (low + dH) / divisor,
+          low: low / divisor,
+          close: (low + dC) / divisor,
+          volume: Number(b.volume) || 0,
+        }
+      }).sort((a, b) => (a.time as number) - (b.time as number))
+
+      candleSeriesRef.current.setData(candles.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })))
+      volumeSeriesRef.current.setData(candles.map(({ time, volume, open, close }) => ({
+        time,
+        value: volume,
+        color: close >= open ? "rgba(4,159,48,0.35)" : "rgba(239,97,97,0.35)",
+      })))
+
+      chartRef.current?.timeScale().fitContent()
+    } catch (err) {
+      console.error("[Chart] Load error:", err)
+      setError(err instanceof Error ? err.message : "Chart load failed")
+    } finally {
+      setLoading(false)
     }
+  }, [symbolId, period, digits, getTrendbars])
 
-    loadData()
-    return () => { cancelled = true }
-  }, [chartReady, symbolId, symbolName, digits, period, getTrendbars])
-
-  useEffect(() => { return () => { chartRef.current = null } }, [])
+  useEffect(() => { loadData() }, [loadData])
 
   const periods = [
     { label: "1M", value: TrendbarPeriod.M1 },
@@ -202,70 +202,75 @@ export function TradingChart({ symbolId, symbolName, digits, getTrendbars, heigh
     { label: "1D", value: TrendbarPeriod.D1 },
   ]
 
-  // Resizable chart height
-  const [chartHeight, setChartHeight] = useState(height)
-  const draggingRef = useRef(false)
-  const startYRef = useRef(0)
-  const startHeightRef = useRef(height)
-
-  const onDragStart = useCallback((e: React.PointerEvent) => {
+  // Resize grip
+  const resizingRef = useRef(false)
+  const onResizeStart = (e: React.MouseEvent | React.TouchEvent) => {
+    resizingRef.current = true
     e.preventDefault()
-    draggingRef.current = true
-    startYRef.current = e.clientY
-    startHeightRef.current = chartHeight
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
-  }, [chartHeight])
-
-  const onDragMove = useCallback((e: React.PointerEvent) => {
-    if (!draggingRef.current) return
-    const delta = startYRef.current - e.clientY // dragging up = bigger
-    const newH = Math.max(height, Math.min(height * 2, startHeightRef.current + delta))
-    setChartHeight(newH)
-  }, [height])
-
-  const onDragEnd = useCallback(() => {
-    draggingRef.current = false
+  }
+  useEffect(() => {
+    const onMove = (e: MouseEvent | TouchEvent) => {
+      if (!resizingRef.current || !containerRef.current) return
+      const clientY = "touches" in e ? e.touches[0].clientY : e.clientY
+      const rect = containerRef.current.getBoundingClientRect()
+      const next = Math.max(120, Math.min(500, rect.bottom - clientY))
+      setChartHeight(next)
+    }
+    const onEnd = () => { resizingRef.current = false }
+    window.addEventListener("mousemove", onMove)
+    window.addEventListener("touchmove", onMove)
+    window.addEventListener("mouseup", onEnd)
+    window.addEventListener("touchend", onEnd)
+    return () => {
+      window.removeEventListener("mousemove", onMove)
+      window.removeEventListener("touchmove", onMove)
+      window.removeEventListener("mouseup", onEnd)
+      window.removeEventListener("touchend", onEnd)
+    }
   }, [])
 
   return (
-    <div className="border-t border-[var(--border)] shrink-0">
-      {/* Drag handle to resize */}
+    <div className="shrink-0 border-t border-[var(--border)]" style={{ background: "#1B1C28" }}>
       <div
-        className="h-3 flex items-center justify-center cursor-ns-resize bg-[var(--card)] hover:bg-[var(--accent)] transition-colors"
-        onPointerDown={onDragStart}
-        onPointerMove={onDragMove}
-        onPointerUp={onDragEnd}
-        onPointerCancel={onDragEnd}
+        onMouseDown={onResizeStart}
+        onTouchStart={onResizeStart}
+        className="h-3 flex items-center justify-center cursor-ns-resize hover:bg-[var(--surface-2)] transition-colors"
       >
-        <div className="w-8 h-1 rounded-full bg-[var(--muted-foreground)]/40" />
+        <div className="w-10 h-0.5 rounded-full bg-[var(--border-strong)]" />
       </div>
 
-      <div className="flex gap-0.5 px-2 py-1.5 bg-[var(--card)]">
+      {/* Timeframe selector */}
+      <div className="flex items-center gap-1 px-2 py-1 border-b border-[var(--border)]">
         {periods.map((p) => (
           <button
             key={p.value}
-            className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-              period === p.value ? "bg-[var(--primary)] text-white" : "text-[var(--muted-foreground)] hover:text-white"
-            }`}
             onClick={() => setPeriod(p.value)}
+            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-colors ${
+              period === p.value
+                ? "bg-[var(--primary)] text-white"
+                : "text-[var(--muted-foreground)] hover:bg-[var(--surface-2)]"
+            }`}
           >
             {p.label}
           </button>
         ))}
-        <span className="ml-auto text-[var(--muted-foreground)] text-xs self-center">{symbolName}</span>
+        <div className="ml-auto flex items-center gap-2 pr-2">
+          <span className="text-[11px] text-[var(--muted-foreground)] font-mono">{symbolName}</span>
+        </div>
       </div>
-      <div className="relative chart-dark-container" style={{ height: chartHeight, background: "#1B1C28" }}>
+
+      <div className="relative" style={{ height: chartHeight, background: "#1B1C28" }}>
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+            <Spinner className="size-5 text-[var(--primary-accent)]" />
+          </div>
+        )}
         {error && !loading && (
-          <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: "#1B1C28" }}>
-            <p className="text-[var(--muted-foreground)] text-xs">{error}</p>
+          <div className="absolute inset-0 flex items-center justify-center z-10">
+            <span className="text-[var(--muted-foreground)] text-xs">{error}</span>
           </div>
         )}
-        {(loading || !libLoaded) && (
-          <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: "#1B1C28" }}>
-            <Spinner className="size-6 text-[var(--primary)]" />
-          </div>
-        )}
-        <div ref={containerNodeRef} style={{ width: "100%", height: "100%" }} />
+        <div ref={containerRef} className="w-full h-full" />
       </div>
     </div>
   )

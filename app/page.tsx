@@ -842,10 +842,13 @@ function MarketsScreen({
                 {symbolPositions.map((pos) => {
                   const isBuy = pos.tradeData.tradeSide === TRADE_SIDE.BUY
                   const currentPrice = isBuy ? quote?.bid : quote?.ask
-                  const entry = pos.price / 100000
-                  const current = currentPrice ? currentPrice / 100000 : null
+                  // pos.price is a float; quote.bid/ask are int scaled by 10^digits
+                  const entry = pos.price > 100 ? pos.price / 100000 : pos.price
+                  const scale = Math.pow(10, details?.digits ?? 5)
+                  const current = currentPrice ? currentPrice / scale : null
                   const units = pos.tradeData.volume / 100
-                  // Monetary PnL in quote currency (approx; accurate for USD-quoted pairs)
+                  // Monetary PnL in quote currency (approx; accurate for USD-quoted pairs).
+                  // cTrader adds closing commission/swap so values will differ by a few.
                   const pnlMoney = current !== null ? (isBuy ? current - entry : entry - current) * units : null
                   return (
                     <div key={pos.positionId} className="flex items-center gap-2 mt-2 pt-1.5 border-t border-[var(--border)]">
@@ -1343,11 +1346,11 @@ function ActivityScreen({
               const details = symbolDetails.get(pos.tradeData.symbolId)
               const currentPrice = isBuy ? quote?.bid : quote?.ask
               const digits = details?.digits ?? 5
-              const pipPos = details?.pipPosition ?? 4
-              const entry = pos.price / 100000
-              const current = currentPrice ? currentPrice / 100000 : null
+              const scale = Math.pow(10, digits)
+              const entry = pos.price > 100 ? pos.price / 100000 : pos.price
+              const current = currentPrice ? currentPrice / scale : null
               const units = pos.tradeData.volume / 100
-              // approximate $ PnL — assumes USD-quoted pair
+              // approximate $ PnL — assumes USD-quoted pair; cTrader adds commission/swap
               const pnlMoney = current !== null ? (isBuy ? current - entry : entry - current) * units : null
               const expanded = expandedPosition === pos.positionId
 
