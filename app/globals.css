@@ -3,85 +3,65 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Dark trading theme - always dark, matching cTrader Figma */
+/* cTrader Figma Dark palette — extracted from Screens 2026 */
 :root {
-  --background: #0d1421;
-  --foreground: #e8ecf1;
-  --card: #151e2d;
-  --card-foreground: #e8ecf1;
-  --popover: #1c2738;
-  --popover-foreground: #e8ecf1;
-  --primary: #3461ff;
-  --primary-foreground: #ffffff;
-  --secondary: #1c2738;
-  --secondary-foreground: #e8ecf1;
-  --muted: #1c2738;
-  --muted-foreground: #6b7d94;
-  --accent: #243042;
-  --accent-foreground: #e8ecf1;
-  --destructive: #ff1744;
-  --destructive-foreground: #ffffff;
-  --border: #243042;
-  --input: #243042;
-  --ring: #3461ff;
-  --chart-1: #3461ff;
-  --chart-2: #00c853;
-  --chart-3: #ff1744;
+  --background: #1B1C28;
+  --surface-1: #22242F;
+  --surface-2: #2A2D3A;
+  --foreground: #FFFFFF;
+  --card: #22242F;
+  --card-foreground: #FFFFFF;
+  --popover: #2A2D3A;
+  --popover-foreground: #FFFFFF;
+  --primary: #2A43B6;
+  --primary-hover: #3654CC;
+  --primary-foreground: #FFFFFF;
+  --primary-accent: #4F6FE3;
+  --secondary: #2A2D3A;
+  --secondary-foreground: #FFFFFF;
+  --muted: #2A2D3A;
+  --muted-foreground: #8A8E9C;
+  --muted-strong: #A8A8BD;
+  --accent: #2A2D3A;
+  --accent-foreground: #FFFFFF;
+  --destructive: #EF6161;
+  --destructive-foreground: #FFFFFF;
+  --border: #2E303C;
+  --border-strong: #404358;
+  --input: #2A2D3A;
+  --ring: #2A43B6;
+  --chart-1: #2A43B6;
+  --chart-2: #049F30;
+  --chart-3: #EF6161;
   --chart-4: #ffc107;
   --chart-5: #ab47bc;
-  --radius: 0.5rem;
-  --sidebar: #151e2d;
-  --sidebar-foreground: #e8ecf1;
-  --sidebar-primary: #3461ff;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #1c2738;
-  --sidebar-accent-foreground: #e8ecf1;
-  --sidebar-border: #243042;
-  --sidebar-ring: #3461ff;
-  --color-profit: #00c853;
-  --color-loss: #ff1744;
-  --color-buy: #00c853;
-  --color-sell: #ff1744;
+  --radius: 0.375rem;
+  --sidebar: #22242F;
+  --sidebar-foreground: #FFFFFF;
+  --sidebar-primary: #2A43B6;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #2A2D3A;
+  --sidebar-accent-foreground: #FFFFFF;
+  --sidebar-border: #2E303C;
+  --sidebar-ring: #2A43B6;
+  --color-profit: #049F30;
+  --color-loss: #EF6161;
+  --color-buy: #049F30;
+  --color-sell: #EF6161;
+  --color-buy-soft: rgba(4, 159, 48, 0.18);
+  --color-sell-soft: rgba(239, 97, 97, 0.18);
+  --footer-bg: #EEEFF4;
+  --footer-fg: #484C6D;
+  --footer-border: #D4D7EC;
 }
 
-.dark {
-  --background: #0d1421;
-  --foreground: #e8ecf1;
-  --card: #151e2d;
-  --card-foreground: #e8ecf1;
-  --popover: #1c2738;
-  --popover-foreground: #e8ecf1;
-  --primary: #3461ff;
-  --primary-foreground: #ffffff;
-  --secondary: #1c2738;
-  --secondary-foreground: #e8ecf1;
-  --muted: #1c2738;
-  --muted-foreground: #6b7d94;
-  --accent: #243042;
-  --accent-foreground: #e8ecf1;
-  --destructive: #ff1744;
-  --destructive-foreground: #ffffff;
-  --border: #243042;
-  --input: #243042;
-  --ring: #3461ff;
-  --chart-1: #3461ff;
-  --chart-2: #00c853;
-  --chart-3: #ff1744;
-  --chart-4: #ffc107;
-  --chart-5: #ab47bc;
-  --sidebar: #151e2d;
-  --sidebar-foreground: #e8ecf1;
-  --sidebar-primary: #3461ff;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #1c2738;
-  --sidebar-accent-foreground: #e8ecf1;
-  --sidebar-border: #243042;
-  --sidebar-ring: #3461ff;
+.dark, :root {
+  color-scheme: dark;
 }
 
 @theme inline {
-  --font-sans: 'Geist', 'Geist Fallback';
-  --font-mono: 'Geist Mono', 'Geist Mono Fallback';
+  --font-sans: 'Inter', 'Geist', system-ui, sans-serif;
+  --font-mono: 'Geist Mono', 'SF Mono', Menlo, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -106,10 +86,10 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -121,51 +101,41 @@
 }
 
 @layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
+  html, body { background: var(--background); }
+  * { @apply border-border outline-ring/50; }
+  body { @apply bg-background text-foreground; font-feature-settings: "cv11", "ss01"; }
+  button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 }
 
-/* Force chart dark theme */
-.chart-dark-container canvas {
-  border-radius: 0 !important;
-}
-.chart-dark-container {
-  background: #0d1421 !important;
-  color-scheme: dark;
-}
-.chart-dark-container * {
-  color-scheme: dark;
-}
+/* Chart area */
+.chart-dark-container canvas { border-radius: 0 !important; }
+.chart-dark-container { background: var(--background) !important; color-scheme: dark; }
+.chart-dark-container * { color-scheme: dark; }
 
-/* Hide ugly scrollbars - only show on hover/scroll */
-.thin-scrollbar {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(107, 125, 148, 0.2) transparent;
-}
-.thin-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.thin-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.thin-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(107, 125, 148, 0);
-  border-radius: 4px;
-  transition: background 0.2s;
-}
-.thin-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: rgba(107, 125, 148, 0.3);
-}
+/* Scrollbars */
+.thin-scrollbar { scrollbar-width: thin; scrollbar-color: rgba(138, 142, 156, 0.2) transparent; }
+.thin-scrollbar::-webkit-scrollbar { width: 4px; }
+.thin-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.thin-scrollbar::-webkit-scrollbar-thumb { background: rgba(138, 142, 156, 0); border-radius: 4px; transition: background 0.2s; }
+.thin-scrollbar:hover::-webkit-scrollbar-thumb { background: rgba(138, 142, 156, 0.3); }
 
-/* Hide horizontal scrollbar on category tabs */
-.hide-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-.hide-scrollbar::-webkit-scrollbar {
-  display: none;
-}
+.hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+
+/* Row hover / active subtle highlight */
+.row-hover:hover { background: rgba(255,255,255,0.015); }
+.row-active { background: rgba(79, 111, 227, 0.06); }
+
+/* Buy / Sell price flash */
+@keyframes flashUp   { 0%{background:rgba(4,159,48,0.35)} 100%{background:transparent} }
+@keyframes flashDown { 0%{background:rgba(239,97,97,0.35)} 100%{background:transparent} }
+.flash-up   { animation: flashUp   0.4s ease-out; }
+.flash-down { animation: flashDown 0.4s ease-out; }
+
+/* Segmented track */
+.segmented { display:flex; background: var(--surface-2); border-radius: 8px; padding: 2px; }
+.segmented > button { flex:1; padding: 6px 10px; border-radius: 6px; font-size: 13px; color: var(--muted-foreground); }
+.segmented > button.on { background: var(--primary); color: #fff; }
+
+/* Tooltip overlay */
+.tooltip-overlay { background: rgba(13, 14, 22, 0.72); backdrop-filter: blur(2px); }
