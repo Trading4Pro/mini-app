@@ -252,7 +252,7 @@ export default function TradingApp() {
             </div>
           )}
 
-          <div className={`flex-1 ${screen === "markets" ? "flex flex-col overflow-hidden" : "overflow-y-auto thin-scrollbar"}`}>
+          <div className={`flex-1 ${screen === "markets" || screen === "activity" ? "flex flex-col overflow-hidden" : "overflow-y-auto thin-scrollbar"}`}>
             {screen === "markets" && (
               <MarketsScreen
                 symbols={filteredSymbols}
@@ -292,15 +292,20 @@ export default function TradingApp() {
                 formatVolume={formatVolume}
                 onClosePosition={(id, v) => setCloseConfirm({ id, volume: v })}
                 cancelOrder={ct.cancelOrder}
+                getDealList={ct.getDealList}
                 activityTab={activityTab}
                 setActivityTab={setActivityTab}
                 expandedPosition={expandedPosition}
                 setExpandedPosition={setExpandedPosition}
+                onEditSymbol={(symbolId) => {
+                  const s = ct.symbols.find((x) => x.symbolId === symbolId)
+                  if (s) openDeal(s)
+                }}
               />
             )}
           </div>
 
-          <Footer />
+          {screen !== "activity" && <Footer />}
         </>
       )}
 
@@ -882,7 +887,7 @@ function MarketsScreen({
 // Instrument card per spec §7
 function InstrumentCard({
   name, category, disabled, fav, pctChange, absChange, sellPx, buyPx,
-  onToggleFav, onBuy, onSell, positions,
+  onToggleFav, onBuy, onSell, positions, highlighted,
 }: {
   name: string
   category: string
@@ -905,6 +910,7 @@ function InstrumentCard({
     onEdit: () => void
     onClose: () => void
   }[]
+  highlighted?: "buy" | "sell"
 }) {
   const tText = disabled ? "var(--mkt-text-disabled)" : "var(--mkt-text)"
   const tSub = disabled ? "var(--mkt-text-disabled)" : "var(--mkt-text-secondary)"
@@ -976,6 +982,7 @@ function InstrumentCard({
           priceColor={disabled ? "var(--mkt-text-disabled)" : "var(--mkt-positive)"}
           disabled={disabled}
           onClick={onSell}
+          filled={highlighted === "sell"}
         />
         <ActionButton
           label="Buy"
@@ -985,6 +992,7 @@ function InstrumentCard({
           priceColor={disabled ? "var(--mkt-text-disabled)" : "var(--mkt-negative)"}
           disabled={disabled}
           onClick={onBuy}
+          filled={highlighted === "buy"}
         />
         <button
           className="flex items-center justify-center"
@@ -1022,7 +1030,7 @@ function InstrumentCard({
 }
 
 function ActionButton({
-  label, price, stroke, labelColor, priceColor, disabled, onClick,
+  label, price, stroke, labelColor, priceColor, disabled, onClick, filled,
 }: {
   label: string
   price: string
@@ -1031,6 +1039,7 @@ function ActionButton({
   priceColor: string
   disabled: boolean
   onClick: () => void
+  filled?: boolean
 }) {
   return (
     <button
@@ -1041,7 +1050,7 @@ function ActionButton({
         flex: 1, height: 40, borderRadius: 2,
         border: `1px solid ${stroke}`,
         cursor: disabled ? "not-allowed" : "pointer",
-        background: "transparent",
+        background: filled ? "var(--mkt-divider)" : "transparent",
       }}
     >
       <span style={{ color: labelColor, fontSize: 14, lineHeight: "16px", fontWeight: 400 }}>
@@ -1171,12 +1180,12 @@ function DealScreen({
   const [tpEnabled, setTpEnabled] = useState(false)
   const [trailingEnabled, setTrailingEnabled] = useState(false)
   const [pendingEnabled, setPendingEnabled] = useState(false)
-  const [slRate, setSlRate] = useState("")
-  const [tpRate, setTpRate] = useState("")
 
   const quote = ct.quotes.get(symbol.symbolId)
   const details = ct.symbolDetails.get(symbol.symbolId)
   const digits = details?.digits ?? 5
+  const pip = Math.pow(10, -(digits - 1)) // EURUSD → 0.0001, USDJPY → 0.01
+  const rateStep = pip                     // one pip per +/- press
 
   const minVol = details?.minVolume ? details.minVolume / 100 : 1000
   const maxVol = details?.maxVolume ? details.maxVolume / 100 : 10000000
@@ -1196,22 +1205,88 @@ function DealScreen({
     localStorage.setItem(`lastVol_${symbol.symbolId}`, String(volume))
   }, [volume, symbol.symbolId])
 
-  const bidPrice = formatPrice(quote?.bid, symbol.symbolId)
-  const askPrice = formatPrice(quote?.ask, symbol.symbolId)
   const bid = quote?.bid ? quote.bid / 100000 : 0
   const ask = quote?.ask ? quote.ask / 100000 : 0
-  const expectedMargin = volume * 0.01 // placeholder until ExpectedMarginReq wired
+  const refPrice = side === "BUY" ? ask : bid
+
+  // Pending-order rate + expiration (hours)
+  const [pendingRate, setPendingRate] = useState<number>(() => refPrice || 0)
+  const [expiryHours, setExpiryHours] = useState<number>(24)
+  const [tpRate, setTpRate] = useState<number>(() => refPrice || 0)
+  const [slRate, setSlRate] = useState<number>(() => refPrice || 0)
+
+  // Seed defaults when a toggle flips ON (use a sensible distance from market)
+  useEffect(() => {
+    if (pendingEnabled && refPrice && (pendingRate === 0 || Math.abs(pendingRate - refPrice) > refPrice * 0.1)) {
+      setPendingRate(refPrice)
+    }
+  }, [pendingEnabled, refPrice])
+
+  useEffect(() => {
+    if (tpEnabled && refPrice && (tpRate === 0 || Math.abs(tpRate - refPrice) > refPrice * 0.1)) {
+      const distance = pip * 20 // 20 pips
+      setTpRate(side === "BUY" ? refPrice + distance : refPrice - distance)
+    }
+  }, [tpEnabled, refPrice, side])
+
+  useEffect(() => {
+    if (slEnabled && refPrice && (slRate === 0 || Math.abs(slRate - refPrice) > refPrice * 0.1)) {
+      const distance = pip * 20
+      setSlRate(side === "BUY" ? refPrice - distance : refPrice + distance)
+    }
+  }, [slEnabled, refPrice, side])
+
+  // Trailing stop requires SL to be on
+  useEffect(() => {
+    if (!slEnabled && trailingEnabled) setTrailingEnabled(false)
+  }, [slEnabled, trailingEnabled])
+
+  const expectedMargin = volume * 0.01
+  const expectedLoss = slEnabled && slRate && refPrice
+    ? (side === "BUY" ? (refPrice - slRate) * volume : (slRate - refPrice) * volume)
+    : 0
+  const expectedProfit = tpEnabled && tpRate && refPrice
+    ? (side === "BUY" ? (tpRate - refPrice) * volume : (refPrice - tpRate) * volume)
+    : 0
+
+  const roundToDigits = (v: number) => Number(v.toFixed(digits))
+  const round2 = (v: number) => Number(v.toFixed(2))
 
   const handleSubmit = async () => {
     setSubmitting(true)
     try {
       const volumeInCents = volume * 100
-      const res = await ct.placeOrder({
+      const tradeSide = side === "BUY" ? TRADE_SIDE.BUY : TRADE_SIDE.SELL
+
+      // Decide order type
+      let orderType: number = ORDER_TYPE.MARKET
+      if (pendingEnabled && pendingRate > 0) {
+        // LIMIT: BUY below market or SELL above market. STOP: the opposite.
+        if (side === "BUY") orderType = pendingRate < ask ? ORDER_TYPE.LIMIT : ORDER_TYPE.STOP
+        else orderType = pendingRate > bid ? ORDER_TYPE.LIMIT : ORDER_TYPE.STOP
+      }
+
+      const params: Parameters<typeof ct.placeOrder>[0] = {
         symbolId: symbol.symbolId,
-        tradeSide: side === "BUY" ? TRADE_SIDE.BUY : TRADE_SIDE.SELL,
+        tradeSide,
         volume: volumeInCents,
-        orderType: ORDER_TYPE.MARKET,
-      })
+        orderType,
+      }
+      if (pendingEnabled && pendingRate > 0) {
+        if (orderType === ORDER_TYPE.LIMIT) params.limitPrice = pendingRate
+        else params.stopPrice = pendingRate
+        params.expirationTimestamp = Date.now() + Math.max(1, expiryHours) * 3600 * 1000
+        params.timeInForce = 1 // GOOD_TILL_DATE
+      }
+      if (slEnabled && slRate > 0) {
+        params.stopLoss = slRate
+        if (trailingEnabled) params.trailingStopLoss = true
+      }
+      if (tpEnabled && tpRate > 0) {
+        params.takeProfit = tpRate
+      }
+
+      const res = await ct.placeOrder(params)
 
       if (res.payloadType === 2132 || res.payloadType === 2142) {
         const desc = (res.description as string) || (res.errorCode as string) || "Unknown error"
@@ -1230,7 +1305,12 @@ function DealScreen({
           message: `${side} ${symbol.symbolName} ${isFilled ? "position was opened" : "pending order was created"}`,
           details: {
             Amount: volume.toLocaleString(),
-            Price: side === "BUY" ? askPrice : bidPrice,
+            Price: pendingEnabled
+              ? pendingRate.toFixed(digits)
+              : side === "BUY" ? ask.toFixed(digits) : bid.toFixed(digits),
+            ...(slEnabled ? { "Stop loss": slRate.toFixed(digits) } : {}),
+            ...(tpEnabled ? { "Take profit": tpRate.toFixed(digits) } : {}),
+            ...(pendingEnabled ? { "Expires in": `${expiryHours}h` } : {}),
             ...(orderId ? { "Order ID": String(orderId) } : {}),
             ...(posId ? { "Position ID": String(posId) } : {}),
           },
@@ -1244,172 +1324,180 @@ function DealScreen({
     }
   }
 
+  const seed = symbol.symbolId
+  const pctChange = ((seed * 9301 + 49297) % 2333) / 100 - 11
+  const absChange = pctChange * 0.0001
+
   return (
-    <div className="flex flex-col h-full bg-[var(--background)]">
-      <div className="h-11 flex items-center px-4 border-b border-[var(--border)] shrink-0">
-        <button onClick={onBack} className="flex items-center gap-1 text-white -ml-1 p-1">
-          <ChevronLeftIcon className="size-5" />
-          <span className="text-sm">Back</span>
+    <div
+      className="flex flex-col h-full"
+      style={{ background: "var(--mkt-bg)", fontFamily: "'Arimo', system-ui, sans-serif" }}
+    >
+      {/* Top nav */}
+      <div
+        className="h-11 flex items-center px-4 shrink-0"
+        style={{ borderBottom: "1px solid var(--mkt-divider-2)" }}
+      >
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1 -ml-1 p-1"
+          style={{ color: "var(--mkt-text-secondary)" }}
+        >
+          <ChevronLeftIcon className="size-5" style={{ color: "var(--mkt-accent-light)" }} />
+          <span className="text-[14px] font-bold">Back</span>
         </button>
-        <span className="flex-1 text-center font-semibold text-[15px] text-white">
+        <span
+          className="flex-1 text-center text-[16px] font-bold"
+          style={{ color: "var(--mkt-text)" }}
+        >
           {side === "BUY" ? "Buy" : "Sell"} {symbol.symbolName}
         </span>
         <div className="w-12" />
       </div>
 
       <div className="flex-1 overflow-y-auto thin-scrollbar">
-        {/* Symbol row */}
-        <div className="px-4 py-3 flex items-center gap-3 border-b border-[var(--border)]">
-          <PairFlag name={symbol.symbolName} size={28} />
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-white font-semibold">{symbol.symbolName}</span>
-            </div>
-            <p className="text-[var(--muted-foreground)] text-[11px]">{symbol.description || "Forex"}</p>
-          </div>
-          <div className="text-right">
-            <span className="text-[var(--color-buy)] text-xs font-semibold">+11.23%</span>
-            <p className="text-[var(--muted-foreground)] text-[11px] tabular-nums">{bid.toFixed(digits)}</p>
-          </div>
-          <StarIcon className="size-4 text-[var(--muted-foreground)]" />
-        </div>
+        {/* Instrument card (active, non-expanded, highlighted on committed side) */}
+        <InstrumentCard
+          name={symbol.symbolName}
+          category={classifySymbol(symbol.symbolName)}
+          disabled={false}
+          fav={false}
+          pctChange={pctChange}
+          absChange={absChange}
+          sellPx={formatPrice(quote?.bid, symbol.symbolId)}
+          buyPx={formatPrice(quote?.ask, symbol.symbolId)}
+          onToggleFav={() => {}}
+          onBuy={() => setSide("BUY")}
+          onSell={() => setSide("SELL")}
+          positions={[]}
+          highlighted={side === "BUY" ? "buy" : "sell"}
+        />
 
-        {/* Sell / Buy toggle */}
-        <div className="px-4 pt-4 flex gap-2">
-          <button
-            className={`flex-1 py-2.5 rounded border text-center transition-colors ${
-              side === "SELL" ? "text-white" : "text-white"
-            }`}
-            style={{
-              background: side === "SELL" ? "var(--primary)" : "var(--color-sell-soft)",
-              borderColor: side === "SELL" ? "var(--primary)" : "rgba(239,97,97,0.4)",
-            }}
-            onClick={() => setSide("SELL")}
-          >
-            <span className="text-[10px] font-semibold uppercase tracking-wider block">Sell</span>
-            <span className="text-sm font-mono font-semibold tabular-nums">{bidPrice}</span>
-          </button>
-          <button
-            className={`flex-1 py-2.5 rounded border text-center transition-colors ${
-              side === "BUY" ? "text-white" : "text-white"
-            }`}
-            style={{
-              background: side === "BUY" ? "var(--primary)" : "var(--color-buy-soft)",
-              borderColor: side === "BUY" ? "var(--primary)" : "rgba(4,159,48,0.4)",
-            }}
-            onClick={() => setSide("BUY")}
-          >
-            <span className="text-[10px] font-semibold uppercase tracking-wider block">Buy</span>
-            <span className="text-sm font-mono font-semibold tabular-nums">{askPrice}</span>
-          </button>
-          <button className="w-8 flex items-center justify-center text-[var(--muted-foreground)]">
-            <InfoIcon className="size-4" />
-          </button>
-        </div>
+        {/* Volume stepper block */}
+        <VolumeStepper
+          label="Volume"
+          value={volume}
+          step={stepVol}
+          min={minVol}
+          max={maxVol}
+          onChange={setVolume}
+          format={(v) => v.toLocaleString()}
+          helperText={`Expected margin ${expectedMargin.toFixed(2)}$`}
+        />
 
-        <div className="px-4 py-4 space-y-3">
-          {/* Volume */}
-          <div className="text-center">
-            <p className="text-[var(--muted-foreground)] text-xs mb-1">Barrels</p>
-            <div className="flex gap-2">
-              <button
-                className="w-11 h-11 rounded-md bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-center text-white"
-                onClick={() => setVolume((v) => Math.max(minVol, Math.round((v - stepVol) / stepVol) * stepVol))}
-              >
-                <MinusIcon className="size-4" />
-              </button>
-              <input
-                type="number"
-                value={volume}
-                onChange={(e) => {
-                  const v = Number(e.target.value)
-                  if (!v || v < minVol) { setVolume(minVol); return }
-                  if (v > maxVol) { setVolume(maxVol); return }
-                  setVolume(Math.round(v / stepVol) * stepVol)
-                }}
-                className="flex-1 h-11 text-center rounded-md bg-[var(--surface-2)] border border-[var(--border)] text-[var(--primary-accent)] font-mono text-base font-semibold outline-none"
-              />
-              <button
-                className="w-11 h-11 rounded-md bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-center text-white"
-                onClick={() => setVolume((v) => Math.min(maxVol, Math.round((v + stepVol) / stepVol) * stepVol))}
-              >
-                <PlusIcon className="size-4" />
-              </button>
-            </div>
-            <p className="text-[var(--muted-foreground)] text-[11px] mt-2">
-              Expected margin {expectedMargin.toFixed(2)}$
-            </p>
-          </div>
-
-          <div className="border-t border-[var(--border)]" />
-
-          {/* Pending rate */}
-          <ToggleRow label={`${side === "BUY" ? "Buy" : "Sell"} when rate is`} enabled={pendingEnabled} onToggle={() => setPendingEnabled(!pendingEnabled)} />
-
-          <div className="border-t border-[var(--border)]" />
-
-          {/* Take Profit */}
-          <ToggleRow label="Take profit" enabled={tpEnabled} onToggle={() => setTpEnabled(!tpEnabled)} />
-          {tpEnabled && (
-            <div className="flex gap-2 items-center">
-              <button className="w-11 h-11 rounded-md bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-center text-white">
-                <MinusIcon className="size-4" />
-              </button>
-              <input
-                value={tpRate}
-                onChange={(e) => setTpRate(e.target.value)}
-                placeholder={(ask * 1.002).toFixed(digits)}
-                className="flex-1 h-11 text-center rounded-md bg-[var(--surface-2)] border border-[var(--border)] text-[var(--primary-accent)] font-mono text-base font-semibold outline-none"
-              />
-              <button className="w-11 h-11 rounded-md bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-center text-white">
-                <PlusIcon className="size-4" />
-              </button>
-            </div>
-          )}
-
-          <div className="border-t border-[var(--border)]" />
-
-          {/* Stop Loss */}
-          <ToggleRow label="Stop loss" enabled={slEnabled} onToggle={() => setSlEnabled(!slEnabled)} />
-          {slEnabled && (
+        {/* Param rows */}
+        <ParamRow
+          label={`${side === "BUY" ? "Buy" : "Sell"} when rate is`}
+          toggled={pendingEnabled}
+          onToggle={setPendingEnabled}
+        >
+          {pendingEnabled && (
             <>
-              <div className="flex gap-2 items-center">
-                <button className="w-11 h-11 rounded-md bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-center text-white">
-                  <MinusIcon className="size-4" />
+              <ValueStepper
+                value={pendingRate}
+                step={rateStep}
+                onChange={(v) => setPendingRate(roundToDigits(v))}
+                format={(v) => v.toFixed(digits)}
+              />
+              <div
+                className="flex items-center justify-center"
+                style={{ gap: 8, marginTop: 8, color: "var(--mkt-text-secondary)", fontSize: 14 }}
+              >
+                <span>Expires in</span>
+                <button
+                  className="flex items-center justify-center"
+                  style={{ width: 28, height: 28, borderRadius: 2, border: "1px solid var(--mkt-stroke)", color: "var(--mkt-text-secondary)" }}
+                  onClick={() => setExpiryHours((h) => Math.max(1, h - 1))}
+                >
+                  <MinusIcon className="size-3" />
                 </button>
-                <input
-                  value={slRate}
-                  onChange={(e) => setSlRate(e.target.value)}
-                  placeholder={(bid * 0.998).toFixed(digits)}
-                  className="flex-1 h-11 text-center rounded-md bg-[var(--surface-2)] border border-[var(--border)] text-[var(--primary-accent)] font-mono text-base font-semibold outline-none"
-                />
-                <button className="w-11 h-11 rounded-md bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-center text-white">
-                  <PlusIcon className="size-4" />
+                <span
+                  className="tabular-nums font-bold"
+                  style={{ color: "var(--mkt-accent-light)", minWidth: 40, textAlign: "center" }}
+                >
+                  {expiryHours}h
+                </span>
+                <button
+                  className="flex items-center justify-center"
+                  style={{ width: 28, height: 28, borderRadius: 2, border: "1px solid var(--mkt-stroke)", color: "var(--mkt-text-secondary)" }}
+                  onClick={() => setExpiryHours((h) => h + 1)}
+                >
+                  <PlusIcon className="size-3" />
                 </button>
               </div>
-              <p className="text-[var(--muted-foreground)] text-[11px] text-center">Expected loss -34.56$</p>
             </>
           )}
+        </ParamRow>
 
-          <div className="border-t border-[var(--border)]" />
+        <ParamRow label="Take profit" toggled={tpEnabled} onToggle={setTpEnabled}>
+          {tpEnabled && (
+            <>
+              <ValueStepper
+                value={tpRate}
+                step={rateStep}
+                onChange={(v) => setTpRate(roundToDigits(v))}
+                format={(v) => v.toFixed(digits)}
+              />
+              <div
+                className="text-center"
+                style={{ color: "var(--mkt-text-secondary)", fontSize: 14, lineHeight: "22px", marginTop: 8 }}
+              >
+                Expected profit {expectedProfit >= 0 ? "+" : ""}{round2(expectedProfit)}$
+              </div>
+            </>
+          )}
+        </ParamRow>
 
-          {/* Trailing Stop */}
-          <ToggleRow label="Trailing stop" enabled={trailingEnabled} onToggle={() => setTrailingEnabled(!trailingEnabled)} />
-        </div>
+        <ParamRow label="Stop loss" toggled={slEnabled} onToggle={setSlEnabled}>
+          {slEnabled && (
+            <>
+              <ValueStepper
+                value={slRate}
+                step={rateStep}
+                onChange={(v) => setSlRate(roundToDigits(v))}
+                format={(v) => v.toFixed(digits)}
+              />
+              <div
+                className="text-center"
+                style={{ color: "var(--mkt-text-secondary)", fontSize: 14, lineHeight: "22px", marginTop: 8 }}
+              >
+                Expected loss {round2(-Math.abs(expectedLoss))}$
+              </div>
+            </>
+          )}
+        </ParamRow>
+
+        <ParamRow
+          label="Trailing stop"
+          toggled={trailingEnabled}
+          onToggle={setTrailingEnabled}
+          dim={!slEnabled}
+        />
       </div>
 
-      {/* Submit button */}
-      <div className="p-4 shrink-0">
+      {/* Primary CTA */}
+      <div className="shrink-0" style={{ padding: "12px 16px 16px" }}>
         <button
           onClick={handleSubmit}
           disabled={submitting}
-          className="w-full py-3.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-semibold text-sm disabled:opacity-50 transition-colors"
+          className="w-full flex items-center justify-center"
+          style={{
+            height: 48,
+            borderRadius: 2,
+            background: "var(--mkt-accent)",
+            border: "1px solid var(--mkt-accent)",
+            color: "#fff",
+            fontSize: 20,
+            fontWeight: 700,
+            lineHeight: "22px",
+            opacity: submitting ? 0.6 : 1,
+          }}
         >
-          {submitting ? <Spinner className="size-5 mx-auto" /> : side === "BUY" ? "Buy" : "Sell"}
+          {submitting ? <Spinner className="size-5" /> : (side === "BUY" ? "Buy" : "Sell")}
         </button>
       </div>
 
-      <Footer />
+      <DarkFooter />
 
       {popup && (
         <ExecutionPopup
@@ -1423,6 +1511,208 @@ function DealScreen({
           }}
         />
       )}
+    </div>
+  )
+}
+
+function VolumeStepper({
+  label, value, step, min, max, onChange, format, helperText,
+}: {
+  label: string
+  value: number
+  step: number
+  min: number
+  max: number
+  onChange: (v: number) => void
+  format: (v: number) => string
+  helperText: string
+}) {
+  const dec = () => onChange(Math.max(min, Math.round((value - step) / step) * step))
+  const inc = () => onChange(Math.min(max, Math.round((value + step) / step) * step))
+  return (
+    <div style={{ padding: "16px 16px 0", borderBottom: "1px solid var(--mkt-divider-2)" }}>
+      <div className="flex flex-col items-center" style={{ gap: 4 }}>
+        <span style={{ color: "var(--mkt-text)", fontSize: 14, lineHeight: "22px", fontWeight: 550 }}>
+          {label}
+        </span>
+        <div className="flex items-center" style={{ gap: 12 }}>
+          <StepperButton onClick={dec}>
+            <MinusIcon className="size-4" />
+          </StepperButton>
+          <div
+            className="flex items-center justify-center"
+            style={{
+              width: 112, height: 36, borderRadius: 2,
+              border: "1px solid var(--mkt-stroke)",
+              color: "var(--mkt-accent-light)",
+              fontSize: 16, fontWeight: 700, lineHeight: "22px",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {format(value)}
+          </div>
+          <StepperButton onClick={inc}>
+            <PlusIcon className="size-4" />
+          </StepperButton>
+        </div>
+      </div>
+      <div
+        className="text-center"
+        style={{
+          color: "var(--mkt-text-secondary)",
+          fontSize: 14, lineHeight: "22px",
+          padding: "8px 0 16px",
+        }}
+      >
+        {helperText}
+      </div>
+    </div>
+  )
+}
+
+function ValueStepper({
+  value, step, onChange, format,
+}: {
+  value: number
+  step: number
+  onChange: (v: number) => void
+  format: (v: number) => string
+}) {
+  return (
+    <div className="flex items-center justify-center" style={{ gap: 16, marginTop: 8 }}>
+      <StepperButton onClick={() => onChange(value - step)}>
+        <MinusIcon className="size-4" />
+      </StepperButton>
+      <div
+        className="flex items-center justify-center"
+        style={{
+          width: 112, height: 36, borderRadius: 2,
+          border: "1px solid var(--mkt-stroke)",
+          color: "var(--mkt-accent-light)",
+          fontSize: 16, fontWeight: 700, lineHeight: "22px",
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {format(value)}
+      </div>
+      <StepperButton onClick={() => onChange(value + step)}>
+        <PlusIcon className="size-4" />
+      </StepperButton>
+    </div>
+  )
+}
+
+function StepperButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center justify-center"
+      style={{
+        width: 36, height: 36, borderRadius: 2,
+        border: "1px solid var(--mkt-stroke)",
+        color: "var(--mkt-text-secondary)",
+        fontSize: 20, fontWeight: 700,
+        background: "transparent",
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
+function ParamRow({
+  label, toggled, onToggle, children, dim,
+}: {
+  label: string
+  toggled: boolean
+  onToggle: (v: boolean) => void
+  children?: React.ReactNode
+  dim?: boolean
+}) {
+  return (
+    <div style={{ borderBottom: "1px solid var(--mkt-divider-2)" }}>
+      <div
+        className="flex items-center justify-between"
+        style={{ height: 48, padding: "0 16px" }}
+      >
+        <span style={{
+          color: dim ? "var(--mkt-text-disabled)" : "var(--mkt-text)",
+          fontSize: 16, lineHeight: "22px", fontWeight: 700,
+        }}>
+          {label}
+        </span>
+        <SpecToggle on={toggled} onChange={onToggle} disabled={dim} />
+      </div>
+      {toggled && children && (
+        <div style={{ padding: "0 16px 16px" }}>
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SpecToggle({
+  on, onChange, disabled,
+}: {
+  on: boolean
+  onChange: (v: boolean) => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      onClick={() => { if (!disabled) onChange(!on) }}
+      disabled={disabled}
+      aria-pressed={on}
+      className="relative"
+      style={{
+        width: 36, height: 20,
+        borderRadius: 10,
+        border: `1px solid ${disabled ? "var(--mkt-text-disabled)" : on ? "var(--mkt-accent-light)" : "var(--mkt-divider)"}`,
+        background: disabled ? "var(--mkt-divider)" : on ? "var(--mkt-accent-light)" : "var(--mkt-divider)",
+        opacity: disabled ? 0.5 : 1,
+        transition: "background 160ms, border-color 160ms",
+      }}
+    >
+      <span
+        style={{
+          position: "absolute",
+          top: 2,
+          left: on ? 18 : 2,
+          width: 14, height: 14,
+          borderRadius: 7,
+          background: "#fff",
+          boxShadow: on ? "-1px 0 2px rgba(26,30,64,0.2)" : "1px 0 2px rgba(116,118,132,0.2)",
+          transition: "left 160ms",
+        }}
+      />
+    </button>
+  )
+}
+
+function DarkFooter() {
+  return (
+    <div
+      className="h-12 flex items-center justify-between shrink-0"
+      style={{ background: "var(--mkt-banner-dark)", padding: "0 16px" }}
+    >
+      <span style={{
+        color: "#fff",
+        fontSize: 16, fontWeight: 700, lineHeight: "22px",
+        fontFamily: "'Open Sans', 'Arimo', system-ui, sans-serif",
+      }}>
+        Sources and details
+      </span>
+      <div className="flex items-center" style={{ gap: 12 }}>
+        <CTraderLogoMark className="w-5 h-5" />
+        <span style={{
+          color: "var(--mkt-banner-gray)",
+          fontSize: 16, fontWeight: 600, lineHeight: "22px",
+          fontFamily: "'Open Sans', 'Arimo', system-ui, sans-serif",
+        }}>
+          Open API
+        </span>
+      </div>
     </div>
   )
 }
@@ -1542,10 +1832,34 @@ function AccountScreen({
 // ============================================================
 // ACTIVITY SCREEN
 // ============================================================
+type OADeal = {
+  dealId: number
+  orderId: number
+  positionId: number
+  volume: number
+  filledVolume: number
+  symbolId: number
+  createTimestamp: number
+  executionTimestamp: number
+  executionPrice?: number
+  tradeSide: number
+  dealStatus: number
+  commission?: number
+  closePositionDetail?: {
+    entryPrice: number
+    grossProfit: number
+    swap: number
+    commission: number
+    balance?: number
+    closedVolume: number
+  }
+}
+
 function ActivityScreen({
   positions, orders, quotes, symbolDetails, getSymbolName,
-  formatVolume, onClosePosition, cancelOrder,
+  formatVolume, onClosePosition, cancelOrder, getDealList,
   activityTab, setActivityTab, expandedPosition, setExpandedPosition,
+  onEditSymbol,
 }: {
   positions: OAPosition[]
   orders: OAOrder[]
@@ -1555,174 +1869,475 @@ function ActivityScreen({
   formatVolume: (vol: number) => string
   onClosePosition: (positionId: number, volume: number) => void
   cancelOrder: (orderId: number) => Promise<unknown>
+  getDealList: (fromMs: number, toMs: number, maxRows?: number) => Promise<{ deal?: OADeal[] } & Record<string, unknown>>
   activityTab: ActivityTab
   setActivityTab: (t: ActivityTab) => void
   expandedPosition: number | null
   setExpandedPosition: (id: number | null) => void
+  onEditSymbol: (symbolId: number) => void
 }) {
+  const [closedDeals, setClosedDeals] = useState<OADeal[]>([])
+  const [closedLoading, setClosedLoading] = useState(false)
+  const [closedLoaded, setClosedLoaded] = useState(false)
+  const [expandedDealId, setExpandedDealId] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (activityTab !== "closed" || closedLoaded || closedLoading) return
+    setClosedLoading(true)
+    const to = Date.now()
+    const from = to - 30 * 24 * 60 * 60 * 1000 // last 30 days
+    getDealList(from, to, 200)
+      .then((res) => {
+        const deals = (res.deal as OADeal[]) || []
+        // Show closing deals (ones that closed a position) — includes full PnL details
+        const closing = deals.filter((d) => d.closePositionDetail)
+        closing.sort((a, b) => b.executionTimestamp - a.executionTimestamp)
+        setClosedDeals(closing)
+        setClosedLoaded(true)
+      })
+      .catch(() => { /* silent — show empty state */ })
+      .finally(() => setClosedLoading(false))
+  }, [activityTab, closedLoaded, closedLoading, getDealList])
+
   return (
-    <div className="flex flex-col min-h-full">
-      {/* Tabs */}
-      <div className="flex border-b border-[var(--border)] shrink-0">
-        {(["positions", "orders", "closed"] as const).map((tab) => (
-          <button
-            key={tab}
-            className={`flex-1 py-3 text-[13px] font-semibold transition-colors relative ${
-              activityTab === tab ? "text-white" : "text-[var(--muted-foreground)]"
-            }`}
-            onClick={() => setActivityTab(tab)}
-          >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
-            {activityTab === tab && (
-              <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-[var(--primary-accent)]" />
-            )}
-          </button>
-        ))}
+    <div
+      className="flex flex-col h-full"
+      style={{ background: "var(--mkt-bg)", fontFamily: "'Arimo', system-ui, sans-serif" }}
+    >
+      {/* Segmented tabs */}
+      <div
+        className="flex shrink-0"
+        style={{ height: 36, background: "var(--mkt-divider)" }}
+      >
+        {([
+          { key: "positions" as const, label: "Positions" },
+          { key: "orders" as const, label: "Orders" },
+          { key: "closed" as const, label: "Closed" },
+        ]).map(({ key, label }) => {
+          const active = activityTab === key
+          return (
+            <button
+              key={key}
+              onClick={() => setActivityTab(key)}
+              className="flex items-center justify-center"
+              style={{
+                flex: 1,
+                background: active ? "var(--mkt-divider-2)" : "transparent",
+                borderBottom: active ? "1px solid var(--mkt-text)" : "1px solid transparent",
+                color: active ? "var(--mkt-text)" : "var(--mkt-text-secondary)",
+                fontWeight: active ? 700 : 400,
+                fontSize: 16, lineHeight: "22px",
+              }}
+            >
+              {label}
+            </button>
+          )
+        })}
       </div>
 
-      <div className="flex-1">
+      <div className="flex-1 overflow-y-auto thin-scrollbar">
         {activityTab === "positions" && (
-          <div>
-            {positions.map((pos) => {
-              const isBuy = pos.tradeData.tradeSide === TRADE_SIDE.BUY
-              const symName = getSymbolName(pos.tradeData.symbolId)
-              const quote = quotes.get(pos.tradeData.symbolId)
-              const details = symbolDetails.get(pos.tradeData.symbolId)
-              const currentPrice = isBuy ? quote?.bid : quote?.ask
-              const digits = details?.digits ?? 5
-              const scale = Math.pow(10, digits)
-              const rawPrice = (pos as unknown as { price?: number; executionPrice?: number; openPrice?: number }).price
-                ?? (pos as unknown as { executionPrice?: number }).executionPrice
-                ?? (pos as unknown as { openPrice?: number }).openPrice
-              const entry = rawPrice == null ? null
-                : rawPrice > 100 ? rawPrice / scale : rawPrice
-              const current = currentPrice ? currentPrice / scale : null
-              const units = pos.tradeData.volume / 100
-              // Only compute PnL when we have valid entry AND current — avoid bogus values
-              const pnlMoney =
-                entry !== null && entry > 0.001 && current !== null
-                  ? (isBuy ? current - entry : entry - current) * units
-                  : null
-              const expanded = expandedPosition === pos.positionId
-
-              return (
-                <div key={pos.positionId} className="border-b border-[var(--border)]">
-                  <button
-                    className="w-full px-3 py-3 flex items-center gap-2 text-left"
-                    onClick={() => setExpandedPosition(expanded ? null : pos.positionId)}
-                  >
-                    <PairFlag name={symName} size={18} />
-                    <span className="text-white text-[13px] font-semibold">{symName}</span>
-                    <span
-                      className="px-1.5 py-px rounded text-[10px] font-bold uppercase tracking-wider"
-                      style={{
-                        background: isBuy ? "var(--primary-accent)" : "var(--color-sell-soft)",
-                        color: "#fff",
-                      }}
-                    >
-                      {isBuy ? "Buy" : "Sell"}
-                    </span>
-                    <span className="text-white text-[13px] tabular-nums">
-                      {units.toLocaleString()}
-                    </span>
-                    <span
-                      className="ml-auto text-[13px] font-mono font-semibold tabular-nums"
-                      style={{ color: pnlMoney !== null && pnlMoney >= 0 ? "var(--color-buy)" : "var(--color-sell)" }}
-                    >
-                      {pnlMoney !== null ? `${pnlMoney >= 0 ? "+" : ""}${pnlMoney.toFixed(2)} $` : "—"}
-                    </span>
-                    {expanded ? (
-                      <ChevronUpIcon className="size-4 text-[var(--muted-foreground)]" />
-                    ) : (
-                      <ChevronDownIcon className="size-4 text-[var(--muted-foreground)]" />
-                    )}
-                  </button>
-
-                  {expanded && (
-                    <div className="px-3 pb-3 space-y-1.5">
-                      <DetailRow label="Position ID" value={String(pos.positionId)} />
-                      <DetailRow label="Amount" value={formatVolume(pos.tradeData.volume)} />
-                      <DetailRow label="Open price" value={entry !== null ? entry.toFixed(digits) : "—"} />
-                      {current && <DetailRow label="Current rate" value={current.toFixed(digits)} />}
-                      {pos.stopLoss && <DetailRow label="Stop Loss" value={(pos.stopLoss / 100000).toFixed(digits)} />}
-                      {pos.takeProfit && <DetailRow label="Take Profit" value={(pos.takeProfit / 100000).toFixed(digits)} />}
-                      <div className="flex gap-2 pt-2">
-                        <button
-                          onClick={() => onClosePosition(pos.positionId, pos.tradeData.volume)}
-                          className="flex-1 py-2 rounded-md bg-[var(--destructive)] text-white text-sm font-medium"
-                        >
-                          Close
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-            {positions.length === 0 && (
-              <p className="text-center text-[var(--muted-foreground)] text-sm py-16 px-6">
-                No active positions in this account at this moment
-              </p>
-            )}
-          </div>
+          <PositionsList
+            positions={positions}
+            quotes={quotes}
+            symbolDetails={symbolDetails}
+            getSymbolName={getSymbolName}
+            formatVolume={formatVolume}
+            expandedId={expandedPosition}
+            onToggleExpand={(id) => setExpandedPosition(expandedPosition === id ? null : id)}
+            onClose={onClosePosition}
+            onEdit={(pos) => onEditSymbol(pos.tradeData.symbolId)}
+          />
         )}
 
         {activityTab === "orders" && (
-          <div>
-            {orders.map((ord) => {
-              const isBuy = ord.tradeData.tradeSide === TRADE_SIDE.BUY
-              const symName = getSymbolName(ord.tradeData.symbolId)
-              const details = symbolDetails.get(ord.tradeData.symbolId)
-              const digits = details?.digits ?? 5
-              const price = ord.limitPrice ?? ord.stopPrice ?? 0
-
-              return (
-                <div key={ord.orderId} className="border-b border-[var(--border)] px-3 py-3 flex items-center gap-2">
-                  <PairFlag name={symName} size={18} />
-                  <span className="text-white text-[13px] font-semibold">{symName}</span>
-                  <span
-                    className="px-1.5 py-px rounded text-[10px] font-bold uppercase tracking-wider text-white"
-                    style={{ background: isBuy ? "var(--primary-accent)" : "var(--color-sell)" }}
-                  >
-                    {isBuy ? "Buy" : "Sell"}
-                  </span>
-                  <span className="text-white text-[13px] tabular-nums">
-                    {formatVolume(ord.tradeData.volume)}
-                  </span>
-                  <span className="ml-auto text-[var(--muted-foreground)] text-xs tabular-nums">
-                    @ {price > 0 ? (price / 100000).toFixed(digits) : "Market"}
-                  </span>
-                  <button
-                    onClick={() => cancelOrder(ord.orderId)}
-                    className="text-[var(--destructive)]"
-                  >
-                    <XIcon className="size-4" />
-                  </button>
-                </div>
-              )
-            })}
-            {orders.length === 0 && (
-              <p className="text-center text-[var(--muted-foreground)] text-sm py-16 px-6">
-                No pending orders in this account at this moment
-              </p>
-            )}
-          </div>
+          <OrdersList
+            orders={orders}
+            symbolDetails={symbolDetails}
+            getSymbolName={getSymbolName}
+            formatVolume={formatVolume}
+            expandedId={expandedPosition}
+            onToggleExpand={(id) => setExpandedPosition(expandedPosition === id ? null : id)}
+            onCancel={cancelOrder}
+            onEdit={(ord) => onEditSymbol(ord.tradeData.symbolId)}
+          />
         )}
 
         {activityTab === "closed" && (
-          <p className="text-center text-[var(--muted-foreground)] text-sm py-16 px-6">
-            No recent trading activity was found. Tap on &quot;Load More&quot; to get trading history for longer period.
-          </p>
+          <ClosedList
+            deals={closedDeals}
+            loading={closedLoading}
+            symbolDetails={symbolDetails}
+            getSymbolName={getSymbolName}
+            formatVolume={formatVolume}
+            expandedId={expandedDealId}
+            onToggleExpand={(id) => setExpandedDealId(expandedDealId === id ? null : id)}
+          />
         )}
       </div>
 
-      {(activityTab === "positions" || activityTab === "orders") && positions.length + orders.length > 0 && (
-        <div className="px-4 pb-3">
-          <button className="w-full py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white text-sm font-semibold transition-colors">
-            Show more
-          </button>
+      <DarkFooter />
+    </div>
+  )
+}
+
+function DealRow({
+  name, side, volume, right, rightColor, expanded, onToggle, children, bottomBorder = true,
+}: {
+  name: string
+  side: "Buy" | "Sell"
+  volume: number
+  right: React.ReactNode
+  rightColor: string
+  expanded: boolean
+  onToggle: () => void
+  children?: React.ReactNode
+  bottomBorder?: boolean
+}) {
+  const sideColor = expanded ? "var(--mkt-text)" : "var(--mkt-text-secondary)"
+  return (
+    <div style={{ borderBottom: bottomBorder && !expanded ? "1px solid var(--mkt-divider)" : "none" }}>
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center"
+        style={{ height: 32, padding: "0 16px", gap: 10 }}
+      >
+        <div style={{ width: 32, display: "flex", alignItems: "center", flexShrink: 0 }}>
+          <PairFlag name={name} size={27} />
+        </div>
+        <div
+          style={{
+            width: 40, fontSize: 14, lineHeight: "22px",
+            color: sideColor, fontWeight: 700, textAlign: "left",
+          }}
+        >
+          {side}
+        </div>
+        <div
+          className="flex-1 text-left"
+          style={{
+            fontSize: 14, lineHeight: "22px",
+            color: sideColor, fontWeight: 550,
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {volume.toLocaleString()}
+        </div>
+        <div
+          className="text-right"
+          style={{
+            fontSize: 14, lineHeight: "22px",
+            color: rightColor,
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {right}
+        </div>
+        <div
+          className="flex items-center justify-center"
+          style={{ width: 24, height: 24, color: "var(--mkt-text)", flexShrink: 0 }}
+        >
+          {expanded
+            ? <ChevronUpIcon className="size-4" />
+            : <ChevronDownIcon className="size-4" />}
+        </div>
+      </button>
+      {expanded && children && (
+        <div style={{ padding: "12px 16px 16px", borderBottom: "1px solid var(--mkt-divider)" }}>
+          {children}
         </div>
       )}
+    </div>
+  )
+}
+
+function DetailLine({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="flex items-center justify-between" style={{
+      fontSize: 14, lineHeight: "22px", color: "var(--mkt-text-secondary)", fontWeight: 550,
+      fontVariantNumeric: "tabular-nums",
+    }}>
+      <span>{label}</span>
+      <span>{value}</span>
+    </div>
+  )
+}
+
+function DetailActions({
+  primary, secondary, onPrimary, onSecondary, primaryIcon, secondaryIcon,
+}: {
+  primary: string
+  secondary: string
+  onPrimary: () => void
+  onSecondary: () => void
+  primaryIcon: React.ReactNode
+  secondaryIcon: React.ReactNode
+}) {
+  return (
+    <div className="flex" style={{ gap: 16, marginTop: 12 }}>
+      <button
+        onClick={onPrimary}
+        className="flex items-center justify-center"
+        style={{
+          flex: 1, height: 32, borderRadius: 2,
+          background: "var(--mkt-accent)", color: "#fff",
+          fontSize: 14, fontWeight: 700, lineHeight: "22px",
+          gap: 4,
+        }}
+      >
+        <span>{primary}</span>
+        {primaryIcon}
+      </button>
+      <button
+        onClick={onSecondary}
+        className="flex items-center justify-center"
+        style={{
+          flex: 1, height: 32, borderRadius: 2,
+          border: "1px solid var(--mkt-divider-2)",
+          color: "var(--mkt-text)",
+          fontSize: 14, fontWeight: 700, lineHeight: "22px",
+          background: "transparent", gap: 4,
+        }}
+      >
+        <span>{secondary}</span>
+        {secondaryIcon}
+      </button>
+    </div>
+  )
+}
+
+function PositionsList({
+  positions, quotes, symbolDetails, getSymbolName, formatVolume,
+  expandedId, onToggleExpand, onClose, onEdit,
+}: {
+  positions: OAPosition[]
+  quotes: Map<number, { bid?: number; ask?: number; timestamp: number }>
+  symbolDetails: Map<number, OASymbol>
+  getSymbolName: (id: number) => string
+  formatVolume: (vol: number) => string
+  expandedId: number | null
+  onToggleExpand: (id: number) => void
+  onClose: (positionId: number, volume: number) => void
+  onEdit: (pos: OAPosition) => void
+}) {
+  if (positions.length === 0) {
+    return (
+      <p className="text-center text-sm py-16 px-6" style={{ color: "var(--mkt-text-secondary)" }}>
+        No active positions in this account at this moment
+      </p>
+    )
+  }
+  return (
+    <div>
+      {positions.map((pos) => {
+        const isBuy = pos.tradeData.tradeSide === TRADE_SIDE.BUY
+        const name = getSymbolName(pos.tradeData.symbolId)
+        const quote = quotes.get(pos.tradeData.symbolId)
+        const d = symbolDetails.get(pos.tradeData.symbolId)
+        const digits = d?.digits ?? 5
+        const scale = Math.pow(10, digits)
+        const raw = (pos as unknown as { price?: number; executionPrice?: number; openPrice?: number }).price
+          ?? (pos as unknown as { executionPrice?: number }).executionPrice
+          ?? (pos as unknown as { openPrice?: number }).openPrice
+        const entry = raw == null ? null : raw > 100 ? raw / scale : raw
+        const currentRaw = isBuy ? quote?.bid : quote?.ask
+        const current = currentRaw ? currentRaw / scale : null
+        const units = pos.tradeData.volume / 100
+        const gross = entry != null && entry > 0.001 && current != null
+          ? (isBuy ? current - entry : entry - current) * units
+          : null
+        const commission = (pos.commission ?? 0) / Math.pow(10, pos.moneyDigits ?? 2)
+        const swap = (pos.swap ?? 0) / Math.pow(10, pos.moneyDigits ?? 2)
+        const net = gross != null ? gross - commission + swap : null
+        const expanded = expandedId === pos.positionId
+        const pnlColor = (gross ?? 0) >= 0 ? "var(--mkt-positive)" : "var(--mkt-negative)"
+
+        return (
+          <DealRow
+            key={pos.positionId}
+            name={name}
+            side={isBuy ? "Buy" : "Sell"}
+            volume={units}
+            right={gross != null ? `${gross >= 0 ? "+" : ""}${gross.toFixed(2)}$` : "—"}
+            rightColor={gross != null ? pnlColor : "var(--mkt-text-secondary)"}
+            expanded={expanded}
+            onToggle={() => onToggleExpand(pos.positionId)}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <DetailLine label="Position ID:" value={`ID${pos.positionId}`} />
+              <DetailLine label="Amount:" value={formatVolume(pos.tradeData.volume)} />
+              {gross != null && (
+                <DetailLine label="Gross PnL:" value={`${gross.toFixed(2)}$`} />
+              )}
+              {net != null && (
+                <DetailLine label="Net PnL:" value={`${net.toFixed(2)}$`} />
+              )}
+              <DetailLine label="Commission:" value={`${commission.toFixed(2)}$`} />
+              <DetailLine label="Swap:" value={`${swap.toFixed(2)}$`} />
+              {entry != null && <DetailLine label="Open rate:" value={entry.toFixed(digits)} />}
+              <DetailLine label="Open time:" value={new Date(pos.tradeData.openTimestamp).toLocaleString()} />
+              {pos.stopLoss && <DetailLine label="Stop loss:" value={(pos.stopLoss / scale).toFixed(digits)} />}
+              {pos.takeProfit && <DetailLine label="Take profit:" value={(pos.takeProfit / scale).toFixed(digits)} />}
+            </div>
+            <DetailActions
+              primary="Edit"
+              secondary="Close"
+              onPrimary={() => onEdit(pos)}
+              onSecondary={() => onClose(pos.positionId, pos.tradeData.volume)}
+              primaryIcon={<PencilIcon className="size-4" />}
+              secondaryIcon={<XIcon className="size-4" />}
+            />
+          </DealRow>
+        )
+      })}
+    </div>
+  )
+}
+
+function OrdersList({
+  orders, symbolDetails, getSymbolName, formatVolume,
+  expandedId, onToggleExpand, onCancel, onEdit,
+}: {
+  orders: OAOrder[]
+  symbolDetails: Map<number, OASymbol>
+  getSymbolName: (id: number) => string
+  formatVolume: (vol: number) => string
+  expandedId: number | null
+  onToggleExpand: (id: number) => void
+  onCancel: (orderId: number) => Promise<unknown>
+  onEdit: (ord: OAOrder) => void
+}) {
+  if (orders.length === 0) {
+    return (
+      <p className="text-center text-sm py-16 px-6" style={{ color: "var(--mkt-text-secondary)" }}>
+        No pending orders in this account at this moment
+      </p>
+    )
+  }
+  const typeName = (t: number) => t === 2 ? "Limit" : t === 3 ? "Stop" : t === 4 ? "Stop Limit" : "Market"
+  return (
+    <div>
+      {orders.map((ord) => {
+        const isBuy = ord.tradeData.tradeSide === TRADE_SIDE.BUY
+        const name = getSymbolName(ord.tradeData.symbolId)
+        const d = symbolDetails.get(ord.tradeData.symbolId)
+        const digits = d?.digits ?? 5
+        const scale = Math.pow(10, digits)
+        const rate = ord.limitPrice ?? ord.stopPrice
+        const rateDisp = rate ? (rate / scale).toFixed(digits) : "Market"
+        const units = ord.tradeData.volume / 100
+        const expanded = expandedId === ord.orderId
+
+        return (
+          <DealRow
+            key={ord.orderId}
+            name={name}
+            side={isBuy ? "Buy" : "Sell"}
+            volume={units}
+            right={`@ ${rateDisp}`}
+            rightColor="var(--mkt-text-secondary)"
+            expanded={expanded}
+            onToggle={() => onToggleExpand(ord.orderId)}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <DetailLine label="Order ID:" value={`ID${ord.orderId}`} />
+              <DetailLine label="Type:" value={typeName(ord.orderType)} />
+              <DetailLine label="Side:" value={isBuy ? "Buy" : "Sell"} />
+              <DetailLine label="Amount:" value={formatVolume(ord.tradeData.volume)} />
+              <DetailLine label="Requested rate:" value={rateDisp} />
+              {ord.stopLoss && <DetailLine label="Stop loss:" value={(ord.stopLoss / scale).toFixed(digits)} />}
+              {ord.takeProfit && <DetailLine label="Take profit:" value={(ord.takeProfit / scale).toFixed(digits)} />}
+              {ord.expirationTimestamp && (
+                <DetailLine label="Expires:" value={new Date(ord.expirationTimestamp).toLocaleString()} />
+              )}
+            </div>
+            <DetailActions
+              primary="Edit"
+              secondary="Cancel"
+              onPrimary={() => onEdit(ord)}
+              onSecondary={() => onCancel(ord.orderId).catch(() => {})}
+              primaryIcon={<PencilIcon className="size-4" />}
+              secondaryIcon={<XIcon className="size-4" />}
+            />
+          </DealRow>
+        )
+      })}
+    </div>
+  )
+}
+
+function ClosedList({
+  deals, loading, symbolDetails, getSymbolName, formatVolume,
+  expandedId, onToggleExpand,
+}: {
+  deals: OADeal[]
+  loading: boolean
+  symbolDetails: Map<number, OASymbol>
+  getSymbolName: (id: number) => string
+  formatVolume: (vol: number) => string
+  expandedId: number | null
+  onToggleExpand: (id: number) => void
+}) {
+  if (loading && deals.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Spinner className="size-6" style={{ color: "var(--mkt-accent-light)" }} />
+      </div>
+    )
+  }
+  if (deals.length === 0) {
+    return (
+      <p className="text-center text-sm py-16 px-6" style={{ color: "var(--mkt-text-secondary)" }}>
+        No recent trading activity was found in the last 30 days.
+      </p>
+    )
+  }
+  return (
+    <div>
+      {deals.map((d) => {
+        const isBuy = d.tradeSide === TRADE_SIDE.BUY
+        const name = getSymbolName(d.symbolId)
+        const sym = symbolDetails.get(d.symbolId)
+        const digits = sym?.digits ?? 5
+        const scale = Math.pow(10, digits)
+        const close = d.executionPrice ?? 0
+        const entry = d.closePositionDetail?.entryPrice ?? 0
+        const gross = (d.closePositionDetail?.grossProfit ?? 0) / 100 // moneyDigits=2 for most
+        const swap = (d.closePositionDetail?.swap ?? 0) / 100
+        const commission = (d.closePositionDetail?.commission ?? 0) / 100
+        const net = gross - commission + swap
+        const units = d.filledVolume / 100
+        const expanded = expandedId === d.dealId
+        const pnlColor = gross >= 0 ? "var(--mkt-positive)" : "var(--mkt-negative)"
+
+        // For a closing deal, the side that was closed is opposite to d.tradeSide
+        const closedSide = isBuy ? "Sell" : "Buy"
+
+        return (
+          <DealRow
+            key={d.dealId}
+            name={name}
+            side={closedSide as "Buy" | "Sell"}
+            volume={units}
+            right={`${gross >= 0 ? "+" : ""}${gross.toFixed(2)}$`}
+            rightColor={pnlColor}
+            expanded={expanded}
+            onToggle={() => onToggleExpand(d.dealId)}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <DetailLine label="Position ID:" value={`ID${d.positionId}`} />
+              <DetailLine label="Amount:" value={formatVolume(d.filledVolume)} />
+              <DetailLine label="Gross PnL:" value={`${gross.toFixed(2)}$`} />
+              <DetailLine label="Net PnL:" value={`${net.toFixed(2)}$`} />
+              <DetailLine label="Commission:" value={`${commission.toFixed(2)}$`} />
+              <DetailLine label="Swap:" value={`${swap.toFixed(2)}$`} />
+              {entry > 0 && <DetailLine label="Open rate:" value={(entry / scale).toFixed(digits)} />}
+              {close > 0 && <DetailLine label="Close rate:" value={(close / scale).toFixed(digits)} />}
+              <DetailLine label="Close time:" value={new Date(d.executionTimestamp).toLocaleString()} />
+            </div>
+          </DealRow>
+        )
+      })}
     </div>
   )
 }

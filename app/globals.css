@@ -67,6 +67,12 @@
   --mkt-positive: #049F30;
   --mkt-negative: #EF6161;
   --mkt-brand: #1A1E40;
+
+  /* Deal + Activity additions */
+  --mkt-accent: #2537C2;
+  --mkt-accent-light: #4F6FE3;
+  --mkt-banner-dark: #222222;
+  --mkt-banner-gray: #D9D9D9;
 }
 
 .dark, :root {

@@ -394,6 +394,9 @@ export function useCTrader() {
     stopPrice?: number
     stopLoss?: number
     takeProfit?: number
+    expirationTimestamp?: number
+    trailingStopLoss?: boolean
+    timeInForce?: number
   }) => {
     const client = clientRef.current
     if (!client || !selectedAccountId) throw new Error("Not connected")
@@ -401,6 +404,17 @@ export function useCTrader() {
     return client.newOrder({
       ctidTraderAccountId: selectedAccountId,
       ...params,
+    })
+  }, [selectedAccountId])
+
+  const getDealList = useCallback(async (fromMs: number, toMs: number, maxRows = 100) => {
+    const client = clientRef.current
+    if (!client || !selectedAccountId) throw new Error("Not connected")
+    return client.getDealList({
+      ctidTraderAccountId: selectedAccountId,
+      fromTimestamp: fromMs,
+      toTimestamp: toMs,
+      maxRows,
     })
   }, [selectedAccountId])
 
@@ -466,5 +480,6 @@ export function useCTrader() {
     cancelOrder,
     getSymbolName,
     getTrendbars,
+    getDealList,
   }
 }

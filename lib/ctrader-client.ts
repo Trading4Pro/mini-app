@@ -234,12 +234,29 @@ export class CTraderClient {
     stopPrice?: number
     stopLoss?: number
     takeProfit?: number
+    expirationTimestamp?: number // ms since epoch — GTD for pending orders
+    trailingStopLoss?: boolean
+    relativeStopLoss?: number
+    relativeTakeProfit?: number
+    timeInForce?: number // 1=GOOD_TILL_DATE, 2=GOOD_TILL_CANCEL, 3=IMMEDIATE_OR_CANCEL, 4=FILL_OR_KILL, 5=MARKET_ON_OPEN
     comment?: string
   }): Promise<CTraderMessage> {
     return this.sendRequest({
       payloadType: PayloadType.OA_NEW_ORDER_REQ,
       ...params,
     })
+  }
+
+  async getDealList(params: {
+    ctidTraderAccountId: number
+    fromTimestamp: number // ms
+    toTimestamp: number // ms
+    maxRows?: number
+  }): Promise<CTraderMessage> {
+    return this.sendRequest({
+      payloadType: PayloadType.OA_DEAL_LIST_REQ,
+      ...params,
+    }, 30000)
   }
 
   async closePosition(ctidTraderAccountId: number, positionId: number, volume: number): Promise<CTraderMessage> {
