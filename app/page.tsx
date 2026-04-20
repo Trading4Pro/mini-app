@@ -5,7 +5,7 @@ import { useCTrader } from "@/hooks/use-ctrader"
 import { TRADE_SIDE, ORDER_TYPE } from "@/types/ctrader"
 import type { OALightSymbol, OASymbol, OAPosition, OAOrder } from "@/types/ctrader"
 import { Spinner } from "@/components/ui/spinner"
-import { TradingChart } from "@/components/trading/chart"
+import { PairFlag } from "@/components/trading/pair-flag"
 import {
   MenuIcon,
   XIcon,
@@ -51,7 +51,6 @@ export default function TradingApp() {
   const [symbolSearch, setSymbolSearch] = useState("")
   const [activityTab, setActivityTab] = useState<ActivityTab>("positions")
   const [expandedPosition, setExpandedPosition] = useState<number | null>(null)
-  const [chartSymbolId, setChartSymbolId] = useState<number | null>(null)
   const [tooltipStep, setTooltipStep] = useState<0 | 1 | 2 | 3>(0) // 0=off, 1/2/3 per spec
   const [closeConfirm, setCloseConfirm] = useState<{ id: number; volume: number } | null>(null)
 
@@ -267,9 +266,6 @@ export default function TradingApp() {
                 getSymbolName={ct.getSymbolName}
                 onOpenDeal={openDeal}
                 onClosePosition={(id, v) => setCloseConfirm({ id, volume: v })}
-                chartSymbolId={chartSymbolId}
-                setChartSymbolId={setChartSymbolId}
-                getTrendbars={ct.getTrendbars}
               />
             )}
             {screen === "account" && (
@@ -612,82 +608,9 @@ function classifySymbol(name: string): string {
   return "Forex"
 }
 
-// Currency code → colour + short label for custom flag badge
-const CCY_STYLE: Record<string, { bg: string; fg: string; stripe?: string }> = {
-  USD: { bg: "#0A3161", fg: "#fff", stripe: "#B22234" },
-  EUR: { bg: "#003399", fg: "#FFCC00" },
-  GBP: { bg: "#012169", fg: "#fff", stripe: "#C8102E" },
-  JPY: { bg: "#fff", fg: "#BC002D", stripe: "#BC002D" },
-  CHF: { bg: "#D52B1E", fg: "#fff" },
-  AUD: { bg: "#012169", fg: "#fff", stripe: "#E4002B" },
-  CAD: { bg: "#D52B1E", fg: "#fff" },
-  NZD: { bg: "#012169", fg: "#fff" },
-  SGD: { bg: "#ED2939", fg: "#fff" },
-  HKD: { bg: "#DE2910", fg: "#fff" },
-  SEK: { bg: "#006AA7", fg: "#FECC00" },
-  NOK: { bg: "#BA0C2F", fg: "#fff" },
-  DKK: { bg: "#C60C30", fg: "#fff" },
-  MXN: { bg: "#006847", fg: "#fff", stripe: "#CE1126" },
-  ZAR: { bg: "#007749", fg: "#FFB81C" },
-  PLN: { bg: "#fff", fg: "#DC143C", stripe: "#DC143C" },
-  TRY: { bg: "#E30A17", fg: "#fff" },
-  CNH: { bg: "#DE2910", fg: "#FFDE00" },
-  RUB: { bg: "#fff", fg: "#1C3578", stripe: "#D52B1E" },
-  BRL: { bg: "#009739", fg: "#FEDD00" },
-  XAU: { bg: "#FFC107", fg: "#3A2A00" },
-  XAG: { bg: "#BFC6CC", fg: "#2C2C2C" },
-  XPT: { bg: "#8D8D8D", fg: "#fff" },
-  XPD: { bg: "#5A5A5A", fg: "#fff" },
-  BTC: { bg: "#F7931A", fg: "#fff" },
-  ETH: { bg: "#627EEA", fg: "#fff" },
-  LTC: { bg: "#345D9D", fg: "#fff" },
-  XRP: { bg: "#000", fg: "#fff" },
-  DOGE: { bg: "#C3A634", fg: "#fff" },
-  SOL: { bg: "#9945FF", fg: "#fff" },
-}
-function currencyPairFromName(name: string): [string, string | null] {
-  const up = name.toUpperCase().replace(/[^A-Z]/g, "")
-  if (up.length >= 6) return [up.slice(0, 3), up.slice(3, 6)]
-  if (up.length >= 3) return [up.slice(0, 3), null]
-  return [up, null]
-}
-function CurrencyBadge({ code, size = 20 }: { code: string; size?: number }) {
-  const style = CCY_STYLE[code] || { bg: "#404358", fg: "#fff" }
-  return (
-    <span
-      className="inline-flex items-center justify-center rounded-full font-bold leading-none select-none"
-      style={{
-        width: size,
-        height: size,
-        background: style.stripe
-          ? `linear-gradient(180deg, ${style.bg} 0%, ${style.bg} 50%, ${style.stripe} 50%, ${style.stripe} 100%)`
-          : style.bg,
-        color: style.fg,
-        fontSize: Math.round(size * 0.42),
-        letterSpacing: "-0.02em",
-      }}
-    >
-      {code.slice(0, 3)}
-    </span>
-  )
-}
-function PairBadge({ name, size = 20 }: { name: string; size?: number }) {
-  const [a, b] = currencyPairFromName(name)
-  if (!b) return <CurrencyBadge code={a} size={size} />
-  return (
-    <span className="inline-flex items-center" style={{ width: size + 10 }}>
-      <CurrencyBadge code={a} size={size} />
-      <span style={{ marginLeft: -8, zIndex: 1 }}>
-        <CurrencyBadge code={b} size={size} />
-      </span>
-    </span>
-  )
-}
-
 function MarketsScreen({
   symbols, quotes, positions, symbolDetails, symbolSearch, setSymbolSearch,
-  formatPrice, formatVolume, getSymbolName, onOpenDeal, onClosePosition,
-  chartSymbolId, setChartSymbolId, getTrendbars,
+  formatPrice, onOpenDeal, onClosePosition,
 }: {
   symbols: OALightSymbol[]
   quotes: Map<number, { bid?: number; ask?: number; timestamp: number }>
@@ -700,9 +623,6 @@ function MarketsScreen({
   getSymbolName: (id: number) => string
   onOpenDeal: (symbol: OALightSymbol) => void
   onClosePosition: (positionId: number, volume: number) => void
-  chartSymbolId: number | null
-  setChartSymbolId: (id: number | null) => void
-  getTrendbars: ReturnType<typeof useCTrader>["getTrendbars"]
 }) {
   const [activeCategory, setActiveCategory] = useState("Favorites")
   const [favorites, setFavorites] = useState<Set<number>>(() => {
@@ -747,169 +667,488 @@ function MarketsScreen({
     return grouped.get(activeCategory) || []
   }, [activeCategory, symbols, grouped, favorites])
 
-  const activeChartId = visibleSymbols.length > 0 ? visibleSymbols[0].symbolId : null
-  const activeChartSymbol = visibleSymbols.length > 0 ? visibleSymbols[0] : null
-  const activeChartDetails = activeChartId ? symbolDetails.get(activeChartId) : null
+  const [pnlExpanded, setPnlExpanded] = useState(false)
+
+  const totalPnL = useMemo(() => {
+    let sum = 0
+    for (const pos of positions) {
+      const q = quotes.get(pos.tradeData.symbolId)
+      const d = symbolDetails.get(pos.tradeData.symbolId)
+      if (!q || !d) continue
+      const isBuy = pos.tradeData.tradeSide === TRADE_SIDE.BUY
+      const current = isBuy ? q.bid : q.ask
+      if (!current) continue
+      const scale = Math.pow(10, d.digits ?? 5)
+      const raw = (pos as unknown as { price?: number; executionPrice?: number; openPrice?: number }).price
+        ?? (pos as unknown as { executionPrice?: number }).executionPrice
+        ?? (pos as unknown as { openPrice?: number }).openPrice
+      const entry = raw == null ? null : raw > 100 ? raw / scale : raw
+      if (entry == null || entry < 0.001) continue
+      const units = pos.tradeData.volume / 100
+      sum += (isBuy ? current / scale - entry : entry - current / scale) * units
+    }
+    return sum
+  }, [positions, quotes, symbolDetails])
 
   return (
-    <div className="flex flex-col h-full">
+    <div
+      className="relative flex flex-col h-full"
+      style={{ background: "var(--mkt-bg)", fontFamily: "'Arimo', system-ui, sans-serif" }}
+    >
       {/* Search */}
       {symbolSearch !== "" || symbols.length > 30 ? (
         <div className="px-3 py-2 shrink-0">
           <div className="relative">
-            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-[var(--muted-foreground)]" />
+            <SearchIcon
+              className="absolute left-3 top-1/2 -translate-y-1/2 size-4"
+              style={{ color: "var(--mkt-text-secondary)" }}
+            />
             <input
               placeholder="Search symbols..."
               value={symbolSearch}
               onChange={(e) => setSymbolSearch(e.target.value)}
-              className="w-full h-9 pl-9 pr-3 rounded-md bg-[var(--surface-2)] border border-[var(--border)] text-white text-sm placeholder:text-[var(--muted-foreground)] outline-none focus:border-[var(--primary-accent)]"
+              className="w-full h-9 pl-9 pr-3 rounded-[2px] text-sm outline-none"
+              style={{
+                background: "var(--mkt-divider)",
+                border: "1px solid var(--mkt-stroke)",
+                color: "var(--mkt-text)",
+              }}
             />
           </div>
         </div>
       ) : null}
 
-      {/* Category tabs */}
-      <div className="flex gap-0 border-b border-[var(--border)] shrink-0 overflow-x-auto hide-scrollbar">
-        {categories.map((cat) => (
-          <TabButton key={cat} label={cat} active={activeCategory === cat} onClick={() => setActiveCategory(cat)} />
-        ))}
+      {/* Category tabs — row 1 (36 px) */}
+      <div
+        className="flex items-stretch shrink-0 overflow-x-auto hide-scrollbar"
+        style={{ background: "var(--mkt-divider)", height: 36 }}
+      >
+        {categories.map((cat) => {
+          const active = activeCategory === cat
+          return (
+            <button
+              key={cat}
+              onClick={() => setActiveCategory(cat)}
+              className="whitespace-nowrap flex items-center"
+              style={{
+                padding: "4px 24px",
+                background: active ? "var(--mkt-divider-2)" : "transparent",
+                borderBottom: active ? "1px solid var(--mkt-text-secondary)" : "1px solid transparent",
+                color: active ? "var(--mkt-text)" : "var(--mkt-text-secondary)",
+                fontWeight: active ? 700 : 400,
+                fontSize: 16,
+                lineHeight: "22px",
+              }}
+            >
+              {cat}
+            </button>
+          )
+        })}
       </div>
 
-      {/* Symbol list */}
+      {/* Sub-tabs — row 2 (32 px) */}
+      <div
+        className="flex items-center shrink-0"
+        style={{
+          height: 32,
+          padding: "0 20px",
+          borderBottom: "1px solid var(--mkt-divider-2)",
+        }}
+      >
+        <span style={{
+          color: "var(--mkt-text-secondary)",
+          fontWeight: 700,
+          fontSize: 14,
+          lineHeight: "22px",
+        }}>
+          Majors
+        </span>
+      </div>
+
+      {/* Instrument list */}
       <div className="flex-1 overflow-y-auto min-h-0 thin-scrollbar">
         {visibleSymbols.length === 0 && activeCategory === "Favorites" && (
-          <p className="text-center text-[var(--muted-foreground)] text-xs py-10 px-8 leading-relaxed">
+          <p
+            className="text-center text-sm py-10 px-8 leading-relaxed"
+            style={{ color: "var(--mkt-text-secondary)" }}
+          >
             You still don&apos;t have any symbols in your &quot;favorites&quot; list.
             Tap a star icon on any symbol to add it to &quot;favorites&quot;.
           </p>
         )}
 
-        {visibleSymbols.map((symbol) => {
+        {visibleSymbols.map((symbol, idx) => {
           const quote = quotes.get(symbol.symbolId)
           const details = symbolDetails.get(symbol.symbolId)
           const symbolPositions = positions.filter((p) => p.tradeData.symbolId === symbol.symbolId)
-          const bid = quote?.bid ? quote.bid / 100000 : undefined
-          const ask = quote?.ask ? quote.ask / 100000 : undefined
           const fav = favorites.has(symbol.symbolId)
+          const disabled = !symbol.enabled
           const seed = symbol.symbolId
           const pctChange = ((seed * 9301 + 49297) % 2333) / 100 - 11
-          const pctColor = pctChange >= 0 ? "var(--color-buy)" : "var(--color-sell)"
+          const absChange = pctChange * 0.0001
+
+          const positionProps = symbolPositions.map((pos) => {
+            const isBuy = pos.tradeData.tradeSide === TRADE_SIDE.BUY
+            const current = isBuy ? quote?.bid : quote?.ask
+            const scale = Math.pow(10, details?.digits ?? 5)
+            const raw = (pos as unknown as { price?: number; executionPrice?: number; openPrice?: number }).price
+              ?? (pos as unknown as { executionPrice?: number }).executionPrice
+              ?? (pos as unknown as { openPrice?: number }).openPrice
+            const entry = raw == null ? null : raw > 100 ? raw / scale : raw
+            const curScaled = current ? current / scale : null
+            const units = pos.tradeData.volume / 100
+            const pnl = (entry != null && entry > 0.001 && curScaled != null)
+              ? (isBuy ? curScaled - entry : entry - curScaled) * units
+              : null
+            return {
+              id: pos.positionId,
+              side: isBuy ? ("Buy" as const) : ("Sell" as const),
+              volume: units,
+              pnl,
+              entry,
+              digits: details?.digits ?? 5,
+              onEdit: () => onOpenDeal(symbol),
+              onClose: () => onClosePosition(pos.positionId, pos.tradeData.volume),
+            }
+          })
 
           return (
-            <div key={symbol.symbolId} className="border-b border-[var(--border)]">
-              <div className="px-3 py-2.5">
-                <div className="flex items-center gap-2 mb-2">
-                  <PairBadge name={symbol.symbolName} size={22} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-white text-[15px] font-semibold truncate">{symbol.symbolName}</span>
-                      <span className="text-xs font-semibold" style={{ color: pctColor }}>
-                        {pctChange >= 0 ? "+" : ""}{pctChange.toFixed(2)}%
-                      </span>
-                    </div>
-                    <p className="text-[var(--muted-foreground)] text-[11px]">{symbol.description || classifySymbol(symbol.symbolName)}</p>
-                  </div>
-                  <span className="text-[var(--muted-foreground)] text-xs tabular-nums" style={{ color: pctColor }}>
-                    {bid ? bid.toFixed(details?.digits ?? 5) : "—"}
-                  </span>
-                  <button onClick={() => toggleFav(symbol.symbolId)} className="p-0.5">
-                    <StarIcon className={`size-4 ${fav ? "fill-[#FFC107] text-[#FFC107]" : "text-[var(--muted-foreground)]"}`} />
-                  </button>
-                </div>
-
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => onOpenDeal(symbol)}
-                    className="flex-1 py-2 rounded border text-center transition-colors"
-                    style={{ background: "var(--color-sell-soft)", borderColor: "rgba(239,97,97,0.4)" }}
-                  >
-                    <span className="text-white text-[10px] font-semibold uppercase tracking-wider block">Sell</span>
-                    <span className="text-white text-[13px] font-mono font-semibold tabular-nums">{formatPrice(quote?.bid, symbol.symbolId)}</span>
-                  </button>
-                  <button
-                    onClick={() => onOpenDeal(symbol)}
-                    className="flex-1 py-2 rounded border text-center transition-colors"
-                    style={{ background: "var(--color-buy-soft)", borderColor: "rgba(4,159,48,0.4)" }}
-                  >
-                    <span className="text-white text-[10px] font-semibold uppercase tracking-wider block">Buy</span>
-                    <span className="text-white text-[13px] font-mono font-semibold tabular-nums">{formatPrice(quote?.ask, symbol.symbolId)}</span>
-                  </button>
-                  <button className="w-8 flex items-center justify-center text-[var(--muted-foreground)]">
-                    <InfoIcon className="size-4" />
-                  </button>
-                </div>
-
-                {symbolPositions.map((pos) => {
-                  const isBuy = pos.tradeData.tradeSide === TRADE_SIDE.BUY
-                  const currentPrice = isBuy ? quote?.bid : quote?.ask
-                  const scale = Math.pow(10, details?.digits ?? 5)
-                  const rawPrice = (pos as unknown as { price?: number; executionPrice?: number; openPrice?: number }).price
-                    ?? (pos as unknown as { executionPrice?: number }).executionPrice
-                    ?? (pos as unknown as { openPrice?: number }).openPrice
-                  const entry = rawPrice == null ? null
-                    : rawPrice > 100 ? rawPrice / scale : rawPrice
-                  const current = currentPrice ? currentPrice / scale : null
-                  const units = pos.tradeData.volume / 100
-                  // Only compute PnL when we have a valid entry (>0.001) AND current price
-                  const pnlMoney =
-                    entry !== null && entry > 0.001 && current !== null
-                      ? (isBuy ? current - entry : entry - current) * units
-                      : null
-                  return (
-                    <div key={pos.positionId} className="flex items-center gap-2 mt-2 pt-1.5 border-t border-[var(--border)]">
-                      <span
-                        className="px-1.5 py-px rounded text-[10px] font-bold text-white uppercase tracking-wider"
-                        style={{ background: isBuy ? "var(--color-buy)" : "var(--color-sell)" }}
-                      >
-                        {isBuy ? "Buy" : "Sell"}
-                      </span>
-                      <span className="text-white text-xs tabular-nums">
-                        {units.toLocaleString()}
-                      </span>
-                      {pnlMoney !== null && (
-                        <span
-                          className="ml-auto font-mono text-xs font-semibold tabular-nums"
-                          style={{ color: pnlMoney >= 0 ? "var(--color-buy)" : "var(--color-sell)" }}
-                        >
-                          {pnlMoney >= 0 ? "+" : ""}{pnlMoney.toFixed(2)} $
-                        </span>
-                      )}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onOpenDeal(symbol) }}
-                        className="p-1 text-[var(--muted-foreground)]"
-                      >
-                        <PencilIcon className="size-3" />
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onClosePosition(pos.positionId, pos.tradeData.volume) }}
-                        className="p-1 text-[var(--muted-foreground)]"
-                      >
-                        <XIcon className="size-3" />
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
+            <InstrumentCard
+              key={symbol.symbolId}
+              name={symbol.symbolName}
+              category={classifySymbol(symbol.symbolName)}
+              disabled={disabled}
+              fav={fav}
+              pctChange={pctChange}
+              absChange={absChange}
+              sellPx={formatPrice(quote?.bid, symbol.symbolId)}
+              buyPx={formatPrice(quote?.ask, symbol.symbolId)}
+              onToggleFav={() => toggleFav(symbol.symbolId)}
+              onBuy={() => onOpenDeal(symbol)}
+              onSell={() => onOpenDeal(symbol)}
+              positions={positionProps}
+            />
           )
         })}
+
         {visibleSymbols.length === 0 && activeCategory !== "Favorites" && (
-          <p className="text-center text-[var(--muted-foreground)] text-sm py-12">
+          <p
+            className="text-center text-sm py-12"
+            style={{ color: "var(--mkt-text-secondary)" }}
+          >
             {symbols.length === 0 ? "Loading symbols..." : "No symbols in this category"}
           </p>
         )}
       </div>
 
-      {/* Chart - sticky */}
-      {activeChartSymbol && activeChartId && (
-        <TradingChart
-          symbolId={activeChartId}
-          symbolName={activeChartSymbol.symbolName}
-          digits={activeChartDetails?.digits ?? 5}
-          getTrendbars={getTrendbars}
-          height={180}
-        />
+      {/* Floating PnL badge (spec §10) */}
+      {positions.length > 0 && (
+        <button
+          onClick={() => setPnlExpanded((v) => !v)}
+          className="absolute flex items-center text-white"
+          style={{
+            bottom: 16,
+            left: pnlExpanded ? 0 : -126,
+            width: 165,
+            height: 40,
+            padding: "8px 8px 8px 16px",
+            gap: 12,
+            background: "var(--mkt-negative)",
+            boxShadow: "0 -2px 12px 2px rgba(72,76,109,0.2)",
+            borderRadius: "0 2px 2px 0",
+            transition: "left 220ms ease",
+            fontWeight: 550,
+            fontSize: 14,
+            lineHeight: "22px",
+          }}
+          aria-label="Total PnL"
+        >
+          <span className="whitespace-nowrap flex-1 text-left">
+            PnL: {totalPnL >= 0 ? "+" : ""}{totalPnL.toFixed(2)}$
+          </span>
+          <ChevronRightIcon
+            className="size-4 shrink-0"
+            style={{
+              transform: pnlExpanded ? "rotate(90deg)" : "rotate(-90deg)",
+              transition: "transform 220ms",
+            }}
+          />
+        </button>
       )}
+    </div>
+  )
+}
+
+// Instrument card per spec §7
+function InstrumentCard({
+  name, category, disabled, fav, pctChange, absChange, sellPx, buyPx,
+  onToggleFav, onBuy, onSell, positions,
+}: {
+  name: string
+  category: string
+  disabled: boolean
+  fav: boolean
+  pctChange: number
+  absChange: number
+  sellPx: string
+  buyPx: string
+  onToggleFav: () => void
+  onBuy: () => void
+  onSell: () => void
+  positions: {
+    id: number
+    side: "Buy" | "Sell"
+    volume: number
+    pnl: number | null
+    entry: number | null
+    digits: number
+    onEdit: () => void
+    onClose: () => void
+  }[]
+}) {
+  const tText = disabled ? "var(--mkt-text-disabled)" : "var(--mkt-text)"
+  const tSub = disabled ? "var(--mkt-text-disabled)" : "var(--mkt-text-secondary)"
+  const tStroke = disabled ? "var(--mkt-text-disabled)" : "var(--mkt-stroke)"
+  const pctPositive = pctChange >= 0
+  const pctColor = disabled
+    ? "var(--mkt-text-disabled)"
+    : pctPositive
+    ? "var(--mkt-positive)"
+    : "var(--mkt-negative)"
+  const bottomBorder = disabled ? "var(--mkt-stroke-muted)" : "var(--mkt-divider-2)"
+
+  return (
+    <div
+      className="w-full"
+      style={{
+        padding: "16px 16px 0",
+        borderBottom: `1px solid ${bottomBorder}`,
+      }}
+    >
+      {/* Header row — 48 px */}
+      <div className="flex items-center justify-between" style={{ height: 48 }}>
+        <div className="flex items-center" style={{ gap: 16 }}>
+          <PairFlag name={name} size={48} disabled={disabled} />
+          <div className="flex flex-col" style={{ gap: 4 }}>
+            <span style={{ color: tText, fontSize: 16, lineHeight: "22px", fontWeight: 700 }}>
+              {name}
+            </span>
+            <span style={{ color: tSub, fontSize: 14, lineHeight: "22px", fontWeight: 400 }}>
+              {category}
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center" style={{ gap: 16 }}>
+          <div className="flex flex-col items-end" style={{ gap: 4 }}>
+            <span style={{ color: pctColor, fontSize: 16, lineHeight: "22px", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+              {pctPositive ? "+" : ""}{pctChange.toFixed(2)}%
+            </span>
+            <span style={{ color: pctColor, fontSize: 14, lineHeight: "22px", fontWeight: 400, fontVariantNumeric: "tabular-nums" }}>
+              {absChange >= 0 ? "+" : ""}{absChange.toFixed(5)}
+            </span>
+          </div>
+          <button
+            onClick={onToggleFav}
+            className="flex items-center justify-center"
+            style={{ width: 24, height: 24 }}
+            aria-label="favorite"
+          >
+            <StarIcon
+              className="size-4"
+              style={{
+                color: disabled
+                  ? "var(--mkt-text-disabled)"
+                  : fav ? "var(--mkt-text)" : "var(--mkt-text-disabled)",
+                fill: fav && !disabled ? "var(--mkt-text)" : "transparent",
+              }}
+            />
+          </button>
+        </div>
+      </div>
+
+      {/* Action row — 40 px */}
+      <div className="flex" style={{ height: 40, gap: 16, marginTop: 12, marginBottom: positions.length ? 0 : 12 }}>
+        <ActionButton
+          label="Sell"
+          price={sellPx}
+          stroke={tStroke}
+          labelColor={tText}
+          priceColor={disabled ? "var(--mkt-text-disabled)" : "var(--mkt-positive)"}
+          disabled={disabled}
+          onClick={onSell}
+        />
+        <ActionButton
+          label="Buy"
+          price={buyPx}
+          stroke={tStroke}
+          labelColor={tText}
+          priceColor={disabled ? "var(--mkt-text-disabled)" : "var(--mkt-negative)"}
+          disabled={disabled}
+          onClick={onBuy}
+        />
+        <button
+          className="flex items-center justify-center"
+          style={{
+            width: 24, height: 40, borderRadius: 2,
+            background: disabled ? "var(--mkt-stroke-muted)" : "var(--mkt-divider)",
+          }}
+          aria-label="info"
+        >
+          <span
+            style={{
+              width: 16, height: 16, borderRadius: "50%",
+              border: "1px solid #fff",
+              color: "#fff",
+              fontSize: 10,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontWeight: 700, fontStyle: "italic", lineHeight: 1,
+            }}
+          >
+            i
+          </span>
+        </button>
+      </div>
+
+      {/* Expanded position rows */}
+      {positions.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          {positions.map((p) => (
+            <OpenPositionRow key={p.id} name={name} disabled={disabled} pos={p} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ActionButton({
+  label, price, stroke, labelColor, priceColor, disabled, onClick,
+}: {
+  label: string
+  price: string
+  stroke: string
+  labelColor: string
+  priceColor: string
+  disabled: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+      className="flex flex-col items-center justify-center"
+      style={{
+        flex: 1, height: 40, borderRadius: 2,
+        border: `1px solid ${stroke}`,
+        cursor: disabled ? "not-allowed" : "pointer",
+        background: "transparent",
+      }}
+    >
+      <span style={{ color: labelColor, fontSize: 14, lineHeight: "16px", fontWeight: 400 }}>
+        {label}
+      </span>
+      <span style={{
+        color: priceColor, fontSize: 14, lineHeight: "16px", fontWeight: 700,
+        fontVariantNumeric: "tabular-nums",
+      }}>
+        {price}
+      </span>
+    </button>
+  )
+}
+
+function OpenPositionRow({
+  name, disabled, pos,
+}: {
+  name: string
+  disabled: boolean
+  pos: {
+    id: number
+    side: "Buy" | "Sell"
+    volume: number
+    pnl: number | null
+    entry: number | null
+    digits: number
+    onEdit: () => void
+    onClose: () => void
+  }
+}) {
+  const tSub = disabled ? "var(--mkt-text-disabled)" : "var(--mkt-text-secondary)"
+  const topBorder = disabled ? "var(--mkt-text-secondary)" : "var(--mkt-divider)"
+
+  const rightText = pos.pnl != null
+    ? `${pos.pnl >= 0 ? "+" : ""}${pos.pnl.toFixed(2)}$`
+    : pos.entry != null
+    ? `@ ${pos.entry.toFixed(pos.digits)}`
+    : "—"
+
+  const rightColor = disabled
+    ? "var(--mkt-text-disabled)"
+    : pos.pnl != null
+    ? (pos.pnl >= 0 ? "var(--mkt-positive)" : "var(--mkt-negative)")
+    : "var(--mkt-text-secondary)"
+
+  return (
+    <div
+      className="flex items-center"
+      style={{
+        height: 32,
+        borderTop: `1px solid ${topBorder}`,
+        marginLeft: -16, marginRight: -16,
+        paddingLeft: 16, paddingRight: 16,
+        gap: 8,
+      }}
+    >
+      <div style={{ width: 32, display: "flex", alignItems: "center" }}>
+        <PairFlag name={name} size={27} disabled={disabled} />
+      </div>
+      <div
+        style={{
+          width: 40, fontSize: 14, lineHeight: "22px",
+          color: tSub, fontWeight: 700,
+        }}
+      >
+        {pos.side}
+      </div>
+      <div
+        className="flex-1"
+        style={{
+          fontSize: 14, lineHeight: "22px",
+          color: tSub, fontWeight: 550,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {pos.volume.toLocaleString()}
+      </div>
+      <div
+        style={{
+          fontSize: 14, lineHeight: "22px",
+          color: rightColor, fontWeight: 400,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {rightText}
+      </div>
+      <div className="flex items-center shrink-0" style={{ gap: 12, marginLeft: 4 }}>
+        <button
+          onClick={(e) => { e.stopPropagation(); if (!disabled) pos.onEdit() }}
+          disabled={disabled}
+          aria-label="edit"
+          className="flex items-center justify-center"
+          style={{ width: 24, height: 24, color: tSub }}
+        >
+          <PencilIcon className="size-4" />
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); if (!disabled) pos.onClose() }}
+          disabled={disabled}
+          aria-label="close"
+          className="flex items-center justify-center"
+          style={{ width: 24, height: 24, color: tSub }}
+        >
+          <XIcon className="size-4" />
+        </button>
+      </div>
     </div>
   )
 }
@@ -1021,7 +1260,7 @@ function DealScreen({
       <div className="flex-1 overflow-y-auto thin-scrollbar">
         {/* Symbol row */}
         <div className="px-4 py-3 flex items-center gap-3 border-b border-[var(--border)]">
-          <PairBadge name={symbol.symbolName} size={28} />
+          <PairFlag name={symbol.symbolName} size={28} />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <span className="text-white font-semibold">{symbol.symbolName}</span>
@@ -1372,7 +1611,7 @@ function ActivityScreen({
                     className="w-full px-3 py-3 flex items-center gap-2 text-left"
                     onClick={() => setExpandedPosition(expanded ? null : pos.positionId)}
                   >
-                    <PairBadge name={symName} size={18} />
+                    <PairFlag name={symName} size={18} />
                     <span className="text-white text-[13px] font-semibold">{symName}</span>
                     <span
                       className="px-1.5 py-px rounded text-[10px] font-bold uppercase tracking-wider"
@@ -1439,7 +1678,7 @@ function ActivityScreen({
 
               return (
                 <div key={ord.orderId} className="border-b border-[var(--border)] px-3 py-3 flex items-center gap-2">
-                  <PairBadge name={symName} size={18} />
+                  <PairFlag name={symName} size={18} />
                   <span className="text-white text-[13px] font-semibold">{symName}</span>
                   <span
                     className="px-1.5 py-px rounded text-[10px] font-bold uppercase tracking-wider text-white"

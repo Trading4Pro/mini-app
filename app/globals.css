@@ -53,6 +53,20 @@
   --footer-bg: #EEEFF4;
   --footer-fg: #484C6D;
   --footer-border: #D4D7EC;
+
+  /* Markets spec tokens */
+  --mkt-bg: #1B1C28;
+  --mkt-bg-elevated: #1C1C1E;
+  --mkt-divider: #404358;
+  --mkt-divider-2: #5D6183;
+  --mkt-stroke: #8E92B1;
+  --mkt-stroke-muted: #A8A8BD;
+  --mkt-text: #EEEFF4;
+  --mkt-text-secondary: #D4D7EC;
+  --mkt-text-disabled: #484C6D;
+  --mkt-positive: #049F30;
+  --mkt-negative: #EF6161;
+  --mkt-brand: #1A1E40;
 }
 
 .dark, :root {
