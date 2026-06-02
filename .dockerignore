@@ -1,0 +1,7 @@
+target/
+.git/
+.claude/
+*.md
+config.json
+.env
+.env.*

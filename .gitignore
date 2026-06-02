@@ -1,19 +1,27 @@
-# v0 sandbox internal files
-__v0_runtime_loader.js
-__v0_devtools.tsx
-__v0_jsx-dev-runtime.ts
-.snowflake/
-.v0-trash/
-.vercel/
-next.user-config.*
+# Java / Maven
+target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+dependency-reduced-pom.xml
 
-# Environment variables
-.env*.local
+# Real config holds the bot token — keep it out of git. Commit config.example.json instead.
+config.json
 
-# Common ignores
-node_modules
-.next/
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS
 .DS_Store
+Thumbs.db
 
 # Claude Code
 .claude/

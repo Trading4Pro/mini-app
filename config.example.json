@@ -1,0 +1,34 @@
+{
+  "botToken": "REPLACE_WITH_YOUR_TOKEN_OR_SET_BOT_TOKEN_ENV",
+  "botUsername": "your_bot_username",
+  "excludeAdmins": true,
+  "adminCacheMinutes": 10,
+  "caseSensitive": false,
+  "wordBoundary": true,
+  "includeMessageLink": true,
+  "jobs": [
+    {
+      "name": "casino-watch",
+      "text": "casino",
+      "origin": "https://t.me/some_public_group",
+      "originApproved": false,
+      "destination": "@my_alerts_channel",
+      "destinationApproved": false,
+      "periodMinutes": 720,
+      "mentionCount": 5,
+      "userCount": 3,
+      "requireAllThresholds": true,
+      "cooldownMinutes": 0
+    },
+    {
+      "name": "airdrop-watch",
+      "text": "free airdrop",
+      "origin": "-1001234567890",
+      "originApproved": false,
+      "destination": "-1009876543210",
+      "destinationApproved": false,
+      "periodMinutes": 120,
+      "mentionCount": 2
+    }
+  ]
+}

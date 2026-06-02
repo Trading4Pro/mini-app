@@ -1,0 +1,18 @@
+# spamwatch-bot — runs as its OWN isolated project on the shared VPS.
+# Compose derives the project name from the directory (/opt/spamwatch-bot),
+# so it never collides with the prop-crm stack. The bot long-polls Telegram,
+# so it exposes NO ports (no conflict with the CRM's 8080/9090/3000).
+services:
+  bot:
+    build:
+      context: .
+    image: spamwatch-bot
+    container_name: spamwatch-bot
+    restart: unless-stopped
+    environment:
+      # Token wins over config.json's botToken. Put the real value in .env.
+      BOT_TOKEN: ${BOT_TOKEN:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      # Real config (jobs, approvals, usernames). Git-ignored; lives only on the VPS.
+      - ./config.json:/app/config.json:ro
