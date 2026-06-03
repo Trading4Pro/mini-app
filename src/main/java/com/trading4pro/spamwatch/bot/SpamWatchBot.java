@@ -194,11 +194,16 @@ public class SpamWatchBot extends TelegramLongPollingBot {
     private String buildAlert(JobRuntime rt, Message msg, JobRuntime.Outcome out) {
         WatchJob job = rt.job();
 
+        String chatName = msg.getChat() != null && msg.getChat().getTitle() != null
+                ? msg.getChat().getTitle()
+                : "the chat";
+
         StringBuilder sb = new StringBuilder();
         sb.append('"').append(job.text).append("\" was mentioned by ")
                 .append(out.distinctUsers())
                 .append(out.distinctUsers() == 1 ? " different user" : " different users")
-                .append(" during last ").append(formatPeriod(job.periodMinutes));
+                .append(" in last ").append(formatPeriod(job.periodMinutes))
+                .append(" in ").append(chatName);
 
         if (cfg.includeMessageLink) {
             String link = ChatRef.messageLink(msg.getChat(), msg.getMessageId());
@@ -209,10 +214,19 @@ public class SpamWatchBot extends TelegramLongPollingBot {
         return sb.toString();
     }
 
-    /** Formats the sliding-window length as HH:MM (e.g. 120 → "02:00", 90 → "01:30"). */
+    /**
+     * Formats the sliding-window length for humans: whole hours as "48 hours" / "1 hour",
+     * sub-hour as "30 minutes", and mixed as "1h 30m".
+     */
     private static String formatPeriod(long minutes) {
         long h = minutes / 60;
         long m = minutes % 60;
-        return String.format("%02d:%02d", h, m);
+        if (m == 0) {
+            return h + (h == 1 ? " hour" : " hours");
+        }
+        if (h == 0) {
+            return m + (m == 1 ? " minute" : " minutes");
+        }
+        return h + "h " + m + "m";
     }
 }
